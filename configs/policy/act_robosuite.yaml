@@ -17,9 +17,9 @@ training:
   offline_steps: 80000
   online_steps: 0
   eval_freq: -1
-  save_freq: 10000
-  log_freq: 100
-  save_checkpoint: false
+  save_freq: 20000
+  log_freq: 200
+  save_checkpoint: true
 
   batch_size: 8
   lr: 1e-5
