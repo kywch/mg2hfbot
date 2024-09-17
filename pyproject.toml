@@ -1,0 +1,121 @@
+[build-system]
+requires = ["cython>=3.0", "pip>=23.0", "setuptools>=61.0", "wheel"]
+
+[project]
+name = "mg2hfbot"
+requires-python = ">=3.10,<3.11"
+version = "0.0.1"
+description = "Use lerobot to use mimicgen data and control robosuite envs"
+keywords = []
+classifiers = [
+	"Natural Language :: English",
+	"Operating System :: POSIX :: Linux",
+	"Operating System :: MacOS :: MacOS X",
+	"Programming Language :: Python",
+	"Programming Language :: Python :: 3.10",
+]
+
+# versions are pinned by pufferlib
+dependencies = [
+    "mimicgen@git+https://github.com/NVlabs/mimicgen.git",
+    "mujoco==2.3.2",  # see https://mimicgen.github.io/docs/introduction/installation.html#mujoco
+    "robosuite==1.4.1",
+    "robomimic==0.3.0",
+    "lerobot@git+https://github.com/huggingface/lerobot.git",
+    "wandb",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["tests"]
+
+[project.optional-dependencies]
+monitoring = [
+    "nvitop"
+]
+dev = [
+    "pre-commit",
+    "ruff"
+]
+
+[tool.distutils.bdist_wheel]
+universal = true
+
+[tool.ruff]
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+]
+
+# Same as Black.
+line-length = 100
+indent-width = 4
+
+# Assume Python 3.11
+target-version = "py310"
+
+[tool.ruff.lint]
+# Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
+# Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
+# McCabe complexity (`C901`) by default.
+select = ["E4", "E7", "E9", "F"]
+ignore = []
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+
+# Enable auto-formatting of code examples in docstrings. Markdown,
+# reStructuredText code/literal blocks and doctests are all supported.
+#
+# This is currently disabled by default, but it is planned for this
+# to be opt-out in the future.
+docstring-code-format = false
+
+# Set the line length limit used when formatting code snippets in
+# docstrings.
+#
+# This only has an effect when the `docstring-code-format` setting is
+# enabled.
+docstring-code-line-length = "dynamic"
