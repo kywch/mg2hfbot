@@ -17,10 +17,10 @@ classifiers = [
 
 # versions are pinned by pufferlib
 dependencies = [
-    "mimicgen@git+https://github.com/NVlabs/mimicgen.git",
+    "mimicgen@git+https://github.com/kywch/mimicgen.git",
     "mujoco==2.3.2",  # see https://mimicgen.github.io/docs/introduction/installation.html#mujoco
     "robosuite==1.4.1",
-    "robomimic==0.3.0",
+    "robomimic@git+https://github.com/ARISE-Initiative/robomimic.git",
     "lerobot@git+https://github.com/kywch/lerobot.git",
     "wandb",
 ]
