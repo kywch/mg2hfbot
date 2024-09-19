@@ -1,7 +1,9 @@
 # Artifacts
 kywch/
 outputs/
-
+mg_download/
+converted/
+tmp/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

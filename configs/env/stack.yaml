@@ -1,0 +1,14 @@
+# @package _global_
+
+fps: 20
+
+env:
+  name: mimicgen
+  task: Stack_D0
+  state_dim: 54
+  action_dim: 7
+  episode_length: 200
+  meta: stack_env.json
+  image_keys: ["agentview", "robot0_eye_in_hand"]
+  state_keys: ["object", "robot0_joint_pos", "robot0_joint_vel", "robot0_eef_pos", "robot0_eef_quat",
+              "robot0_eef_vel_lin", "robot0_eef_vel_ang", "robot0_gripper_qpos", "robot0_gripper_qvel"]

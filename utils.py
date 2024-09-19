@@ -21,31 +21,13 @@ from lerobot.common.datasets.transforms import get_image_transforms
 
 ENV_META_DIR = Path("./env_meta")
 
-# This is for Stack. See if this works for other mimicgen envs
-IMAGE_KEYS = ["agentview", "robot0_eye_in_hand"]
-STATE_KEYS = [
-    "object",
-    "robot0_joint_pos",
-    "robot0_joint_vel",
-    "robot0_eef_pos",
-    "robot0_eef_quat",
-    "robot0_eef_vel_lin",
-    "robot0_eef_vel_ang",
-    "robot0_gripper_qpos",
-    "robot0_gripper_qvel",
-]
-
-# Mimicgen requires this to be set globally
-ObsUtils.initialize_obs_modality_mapping_from_dict(
-    modality_mapping={"rgb": [f"{k}_image" for k in IMAGE_KEYS]}
-)
-
 
 def load_stats_from_safetensors(filename):
     result = {}
     with safe_open(filename, framework="pt", device="cpu") as f:
         for k in f.keys():
             # NOTE: Assume k is of the form "key/stat"
+            # Chech if this is so with the dataset downloaded from the hub
             key = k.split("/")[0]
             if key not in result:
                 result[key] = {}
@@ -108,14 +90,16 @@ def make_dataset_from_local(cfg, root_dir=".", split: str = "train") -> LeRobotD
 
 # CHECK ME: Is this the right place? Revisit later
 class MimicgenWrapper:
-    def __init__(self, env, hydra_cfg, env_meta, episode_length=200):
+    def __init__(self, env, env_cfg, env_meta, episode_length=200):
         self.env = env
-        self.cfg = hydra_cfg
+        self.cfg = env_cfg
         self.env_meta = env_meta
+        self.image_keys = env_cfg.image_keys
+        self.state_keys = env_cfg.state_keys
 
         self._max_episode_steps = episode_length
-        if "episode_length" in hydra_cfg:
-            self._max_episode_steps = hydra_cfg.episode_length
+        if "episode_length" in env_cfg:
+            self._max_episode_steps = env_cfg.episode_length
         self.tick = 0
 
         self.metadata = {
@@ -141,7 +125,7 @@ class MimicgenWrapper:
                             ),
                             dtype=np.uint8,
                         )
-                        for k in IMAGE_KEYS
+                        for k in self.image_keys
                     }
                 ),
                 "agent_pos": spaces.Box(
@@ -155,16 +139,15 @@ class MimicgenWrapper:
         )
 
     def _process_obs(self, obs):
-        # TODO: check if IMAGE_KEYS and STATE_KEYS are correct for other cases
         obs_dict = {
             "pixels": {
                 k: (np.transpose(obs[f"{k}_image"], (1, 2, 0)) * 255).astype(np.uint8)
-                for k in IMAGE_KEYS
+                for k in self.image_keys
             }
         }
 
         state_obs_list = []
-        for k in STATE_KEYS:
+        for k in self.state_keys:
             state_obs_list.append(np.array(obs[k]))
         obs_dict.update({"agent_pos": np.concatenate(state_obs_list)})
 
@@ -175,6 +158,12 @@ class MimicgenWrapper:
         self.tick = 0
         # NOTE: EnvRobosuite reset() does NOT take seed
         obs = self.env.reset()
+        info = {"is_success": False}
+        return self._process_obs(obs), info
+
+    def reset_to(self, initial_state_dict):
+        self.tick = 0
+        obs = self.env.reset_to(initial_state_dict)
         info = {"is_success": False}
         return self._process_obs(obs), info
 
@@ -211,6 +200,11 @@ def make_mimicgen_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.
     if cfg.env.name == "real_world":
         return
 
+    # Mimicgen requires this to be set globally
+    ObsUtils.initialize_obs_modality_mapping_from_dict(
+        modality_mapping={"rgb": [f"{k}_image" for k in cfg.env.image_keys]}
+    )
+
     # load the env meta file
     env_meta_file = ENV_META_DIR / cfg.env.meta
     with open(env_meta_file, "r") as f:
@@ -231,6 +225,7 @@ def make_mimicgen_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.
     #     gym_kwgs["max_episode_steps"] = cfg.env.episode_length
 
     # NOTE: CANNOT use vecenv for some reason, ignore cfg.eval.batch_size
+    # I guess this is OK since I am not using the vecenv for training
     return gym.vector.SyncVectorEnv([env_creator])
 
     # # batched version of the env that returns an observation of shape (b, c)
