@@ -122,7 +122,7 @@ def make_lerobot_dataset(task, dataset_path, output_dir, img_height=256, img_wid
     id_from = 0
 
     print("Replaying actions...")
-    for ep_idx, demo_key in tqdm(enumerate(demos)):
+    for ep_idx, demo_key in tqdm(enumerate(demos), total=len(demos)):
         # robosuite datasets store the ground-truth simulator states under the "states" key.
         # We will use the first one, alone with the model xml, to reset the environment to
         # the initial configuration before playing back actions.
