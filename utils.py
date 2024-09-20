@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from collections import deque
 from omegaconf import OmegaConf, DictConfig
 
 import gymnasium as gym
@@ -90,12 +91,13 @@ def make_dataset_from_local(cfg, root_dir=".", split: str = "train") -> LeRobotD
 
 # CHECK ME: Is this the right place? Revisit later
 class MimicgenWrapper:
-    def __init__(self, env, env_cfg, env_meta, episode_length=200):
+    def __init__(self, env, env_cfg, env_meta, episode_length=200, success_criteria=10):
         self.env = env
         self.cfg = env_cfg
         self.env_meta = env_meta
         self.image_keys = env_cfg.image_keys
         self.state_keys = env_cfg.state_keys
+        self.success_history = deque(maxlen=success_criteria)
 
         self._max_episode_steps = episode_length
         if "episode_length" in env_cfg:
@@ -154,25 +156,33 @@ class MimicgenWrapper:
         self.obs = obs_dict
         return self.obs
 
-    def reset(self, seed=None, options=None):
+    def _reset_and_get_info(self):
         self.tick = 0
+        self.success_history.clear()
+        self.success_history.append(0)  # add a dummy element to the history
+        return {"is_success": False}  # dummy info
+
+    def reset(self, seed=None, options=None):
+        info = self._reset_and_get_info()
         # NOTE: EnvRobosuite reset() does NOT take seed
         obs = self.env.reset()
-        info = {"is_success": False}
         return self._process_obs(obs), info
 
     def reset_to(self, initial_state_dict):
-        self.tick = 0
+        info = self._reset_and_get_info()
         obs = self.env.reset_to(initial_state_dict)
-        info = {"is_success": False}
         return self._process_obs(obs), info
 
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
 
         check_success = self.env.is_success()
-        done = is_success = check_success["task"]
+        self.success_history.append(check_success["task"])
 
+        # The task is done when the success history is full of 1s
+        # NOTE: It's possible that the robot succeeded at the very end, so the history may not be full of 1s
+        # Then, it will be considered as a failure.
+        done = is_success = sum(self.success_history) == len(self.success_history)
         info = {"is_success": is_success}
 
         self.tick += 1

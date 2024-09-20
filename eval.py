@@ -48,6 +48,7 @@ def main(
     pretrained_policy_path: Path | None = None,
     hydra_cfg_path: str | None = None,
     out_dir: str | None = None,
+    eval_n_episodes: int = 50,
     config_overrides: list[str] | None = None,
 ):
     assert (pretrained_policy_path is None) ^ (hydra_cfg_path is None)
@@ -56,15 +57,8 @@ def main(
     else:
         hydra_cfg = init_hydra_config(hydra_cfg_path, config_overrides)
 
-    if hydra_cfg.eval.batch_size > hydra_cfg.eval.n_episodes:
-        raise ValueError(
-            "The eval batch size is greater than the number of eval episodes "
-            f"({hydra_cfg.eval.batch_size} > {hydra_cfg.eval.n_episodes}). As a result, {hydra_cfg.eval.batch_size} "
-            f"eval environments will be instantiated, but only {hydra_cfg.eval.n_episodes} will be used. "
-            "This might significantly slow down evaluation. To fix this, you should update your command "
-            f"to increase the number of episodes to match the batch size (e.g. `eval.n_episodes={hydra_cfg.eval.batch_size}`), "
-            f"or lower the batch size (e.g. `eval.batch_size={hydra_cfg.eval.n_episodes}`)."
-        )
+    # override the number of episodes to evaluate the policy on
+    hydra_cfg.eval.n_episodes = eval_n_episodes
 
     if out_dir is None:
         out_dir = f"outputs/eval/{dt.now().strftime('%Y-%m-%d/%H-%M-%S')}_{hydra_cfg.env.name}_{hydra_cfg.policy.name}"
@@ -141,6 +135,13 @@ if __name__ == "__main__":
             "debugging). This argument is mutually exclusive with `--pretrained-policy-name-or-path` (`-p`)."
         ),
     )
+    parser.add_argument(
+        "-n",
+        "--eval-n-episodes",
+        type=int,
+        default=50,
+        help="Number of episodes to evaluate the policy on.",
+    )
     parser.add_argument("--revision", help="Optionally provide the Hugging Face Hub revision ID.")
     parser.add_argument(
         "--out-dir",
@@ -156,10 +157,13 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    args.pretrained_policy_name_or_path = "outputs/test_80k"
-
     if args.pretrained_policy_name_or_path is None:
-        main(hydra_cfg_path=args.config, out_dir=args.out_dir, config_overrides=args.overrides)
+        main(
+            hydra_cfg_path=args.config,
+            out_dir=args.out_dir,
+            eval_n_episodes=args.eval_n_episodes,
+            config_overrides=args.overrides,
+        )
     else:
         pretrained_policy_path = get_pretrained_policy_path(
             args.pretrained_policy_name_or_path, revision=args.revision
@@ -168,5 +172,6 @@ if __name__ == "__main__":
         main(
             pretrained_policy_path=pretrained_policy_path,
             out_dir=args.out_dir,
+            eval_n_episodes=args.eval_n_episodes,
             config_overrides=args.overrides,
         )
