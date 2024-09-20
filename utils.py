@@ -91,7 +91,7 @@ def make_dataset_from_local(cfg, root_dir=".", split: str = "train") -> LeRobotD
 
 # CHECK ME: Is this the right place? Revisit later
 class MimicgenWrapper:
-    def __init__(self, env, env_cfg, env_meta, episode_length=200, success_criteria=10):
+    def __init__(self, env, env_cfg, env_meta, episode_length=200, success_criteria=30):
         self.env = env
         self.cfg = env_cfg
         self.env_meta = env_meta
