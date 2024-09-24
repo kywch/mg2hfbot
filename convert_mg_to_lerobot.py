@@ -167,9 +167,10 @@ def make_lerobot_dataset(task, dataset_path, output_dir, img_height=256, img_wid
     ep_dicts = []
     episode_data_index = {"from": [], "to": []}
     id_from = 0
+    ep_success = {}
 
     print("Replaying actions...")
-    for demo_key in tqdm(demos):
+    for ep_idx, demo_key in tqdm(enumerate(demos), total=len(demos)):
         # robosuite datasets store the ground-truth simulator states under the "states" key.
         # We will use the first one, alone with the model xml, to reset the environment to
         # the initial configuration before playing back actions.
@@ -181,8 +182,9 @@ def make_lerobot_dataset(task, dataset_path, output_dir, img_height=256, img_wid
         ep_dict, image_obs, is_success = rollout_episode(env, initial_state_dict, action_mat)
         ep_len = ep_dict["action"].shape[0]
 
-        ep_idx = int(demo_key.split("_")[-1])
+        # ep_idx = int(demo_key.split("_")[-1])
         ep_dict["episode_index"] = torch.tensor([ep_idx] * ep_len, dtype=torch.int64)
+        ep_success[ep_idx] = {"demo_key": demo_key, "is_success": is_success}
 
         for img_key in env.image_keys:
             save_images_concurrently(
@@ -259,9 +261,15 @@ def make_lerobot_dataset(task, dataset_path, output_dir, img_height=256, img_wid
 
     save_meta_data(info, stats, episode_data_index, Path(f"{output_dir}/meta_data/"))
 
-    # Also save the env_meta file to the meta_data dir, for future reference
+    # Also save the used config and env_meta files to the meta_data dir, for future reference
+    with open(Path(f"{output_dir}/meta_data/config.yaml"), "w") as f:
+        yaml.dump(cfg, f)
+
     with open(Path(f"{output_dir}/meta_data/env_meta.json"), "w") as f:
         json.dump(env_meta, f, indent=2)
+
+    with open(Path(f"{output_dir}/meta_data/ep_success.json"), "w") as f:
+        json.dump(ep_success, f, indent=2)
 
     print(f"Finished converting the mimicgen {task} dataset to lerobot dataset.")
 
