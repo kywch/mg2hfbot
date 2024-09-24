@@ -182,7 +182,7 @@ class MimicgenWrapper:
         # The task is done when the success history is full of 1s
         # NOTE: It's possible that the robot succeeded at the very end, so the history may not be full of 1s
         # Then, it will be considered as a failure.
-        done = is_success = sum(self.success_history) == len(self.success_history)
+        done = is_success = self.is_success()
         info = {"is_success": is_success}
 
         self.tick += 1
@@ -191,6 +191,9 @@ class MimicgenWrapper:
             truncated = True
 
         return self._process_obs(obs), reward, done, truncated, info
+
+    def is_success(self):
+        return sum(self.success_history) == len(self.success_history)
 
     def render(self):
         return self.obs["pixels"]["agentview"]

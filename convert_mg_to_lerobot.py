@@ -52,7 +52,7 @@ def download_mimicgen_dataset(base_dir, task, dataset_type="source", overwrite=F
             dataset_type, task, download_path
         )
     )
-    url = DATASET_REGISTRY[download_dataset_type][task]["url"]
+    url = DATASET_REGISTRY[dataset_type][task]["url"]
     # Make sure path exists and create if it doesn't
     os.makedirs(download_dir, exist_ok=True)
 
@@ -70,6 +70,53 @@ def download_mimicgen_dataset(base_dir, task, dataset_type="source", overwrite=F
     )
     print("")
     return download_path
+
+
+def rollout_episode(env, initial_state_dict, action_mat, follow_through=30, use_tqdm=False):
+    # reset to initial state
+    obs, _ = env.reset_to(initial_state_dict)
+
+    # init buffers
+    # NOTE: mimicgen wrapper only returns pixels and agent_pos
+    image_obs = {k: [] for k in env.image_keys}
+    state_obs = []
+
+    # playback actions one by one, and follow through for a few more steps
+
+    # The EE stays in the same place, with open gripper
+    final_action = np.zeros((follow_through, env.cfg.action_dim))
+
+    # append the final action to the action_mat
+    mod_action = np.vstack([action_mat, final_action])
+
+    def step(action):
+        obs, reward, done, trunc, info = env.step(action)
+        # NOTE: assume that obs to keep are only the agent_pos or the images
+        for key in image_obs.keys():
+            image_obs[key].append(obs["pixels"][key])
+        state_obs.append(obs["agent_pos"])
+
+    if use_tqdm is True:
+        for action in tqdm(mod_action):
+            step(action)
+    else:
+        for action in mod_action:
+            step(action)
+
+    ep_dict = {}
+    ep_len = mod_action.shape[0]
+    timestamps = [i / env.env_meta["env_kwargs"]["control_freq"] for i in range(ep_len)]
+
+    ep_dict["observation.state"] = torch.tensor(np.vstack(state_obs))
+    ep_dict["action"] = torch.tensor(mod_action)
+    ep_dict["next.done"] = torch.zeros(ep_len, dtype=torch.bool)
+    ep_dict["next.done"][-1] = True
+
+    # NOTE: assuming every demo is reproduced. Add error handling if not true?
+    ep_dict["frame_index"] = torch.arange(ep_len, dtype=torch.int64)  # start from 0
+    ep_dict["timestamp"] = torch.tensor(timestamps)
+
+    return ep_dict, image_obs, env.is_success()
 
 
 # NOTE: Using only single env due to technical difficuties
@@ -122,45 +169,24 @@ def make_lerobot_dataset(task, dataset_path, output_dir, img_height=256, img_wid
     id_from = 0
 
     print("Replaying actions...")
-    for ep_idx, demo_key in tqdm(enumerate(demos), total=len(demos)):
+    for demo_key in tqdm(demos):
         # robosuite datasets store the ground-truth simulator states under the "states" key.
         # We will use the first one, alone with the model xml, to reset the environment to
         # the initial configuration before playing back actions.
         init_state = mg_file["data/{}/states".format(demo_key)][0]
         model_xml = mg_file["data/{}".format(demo_key)].attrs["model_file"]
         initial_state_dict = dict(states=init_state, model=model_xml)
+        action_mat = mg_file["data/{}/actions".format(demo_key)][:]
 
-        # reset to initial state
-        obs, _ = env.reset_to(initial_state_dict)
+        ep_dict, image_obs, is_success = rollout_episode(env, initial_state_dict, action_mat)
+        ep_len = ep_dict["action"].shape[0]
 
-        # init buffers
-        # NOTE: mimicgen wrapper only returns pixels and agent_pos
-        obs_replay = {k: [] for k in env_config.image_keys + ["agent_pos"]}
-        action_replay = mg_file["data/{}/actions".format(demo_key)][:]
-        timestamps = []
+        ep_idx = int(demo_key.split("_")[-1])
+        ep_dict["episode_index"] = torch.tensor([ep_idx] * ep_len, dtype=torch.int64)
 
-        # playback actions one by one, and render frames
-        for tick, action in enumerate(action_replay.tolist()):
-            obs, reward, done, trunc, info = env.step(action)
-
-            # NOTE: assume that obs to keep are only the agent_pos or the images
-            for key in obs_replay.keys():
-                if key in obs:
-                    # obs_replay[key].append(deepcopy(obs[key]))
-                    obs_replay[key].append(obs[key])
-                else:
-                    # TODO: error handling?
-                    # obs_replay[key].append(deepcopy(obs["pixels"][key]))
-                    obs_replay[key].append(obs["pixels"][key])
-
-            timestamps.append(tick * 1 / fps)
-
-        ep_dict = {}
-        ep_len = action_replay.shape[0]
-
-        for img_key in env_config.image_keys:
+        for img_key in env.image_keys:
             save_images_concurrently(
-                obs_replay[img_key],
+                image_obs[img_key],
                 Path(f"{output_dir}/images/{img_key}_episode_{ep_idx:06d}"),
                 NUM_WORKERS,
             )
@@ -168,18 +194,9 @@ def make_lerobot_dataset(task, dataset_path, output_dir, img_height=256, img_wid
 
             # store the reference to the video frame
             ep_dict[f"observation.images.{img_key}"] = [
-                {"path": f"videos/{fname}", "timestamp": tstp} for tstp in timestamps
+                {"path": f"videos/{fname}", "timestamp": tstp}
+                for tstp in ep_dict["timestamp"].tolist()
             ]
-
-        ep_dict["observation.state"] = torch.tensor(np.vstack(obs_replay["agent_pos"]))
-        ep_dict["action"] = torch.tensor(action_replay)
-        ep_dict["next.done"] = torch.zeros(ep_len, dtype=torch.bool)
-        ep_dict["next.done"][-1] = True
-
-        # NOTE: assuming every demo is reproduced. Add error handling if not true?
-        ep_dict["episode_index"] = torch.tensor([ep_idx] * ep_len, dtype=torch.int64)
-        ep_dict["frame_index"] = torch.arange(ep_len, dtype=torch.int64)  # start from 0
-        ep_dict["timestamp"] = torch.tensor(timestamps)
 
         ep_dicts.append(ep_dict)
         episode_data_index["from"].append(id_from)
