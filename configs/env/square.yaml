@@ -1,11 +1,11 @@
 fps: 20
 env:
   name: mimicgen
-  task: Stack_D0
-  state_dim: 68
+  task: Square_D0
+  state_dim: 59
   action_dim: 7
-  episode_length: 200
-  meta: stack_env.json
+  episode_length: 250
+  meta: square_env.json
   image_keys:
   - agentview
   - robot0_eye_in_hand

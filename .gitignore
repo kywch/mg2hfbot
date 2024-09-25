@@ -3,7 +3,7 @@ kywch/
 outputs/
 mg_download/
 converted/
-tmp/
+tmp*/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

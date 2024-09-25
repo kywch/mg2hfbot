@@ -1,7 +1,7 @@
 defaults:
   - _self_
   - env: stack_d0
-  - policy: act_robosuite
+  - policy: diffusion_robosuite
 
 hydra:
   run:

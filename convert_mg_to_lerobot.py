@@ -46,12 +46,11 @@ ENV_CONFIG_DIR = Path("./configs/env")
 
 def download_mimicgen_dataset(base_dir, task, dataset_type="source", overwrite=False):
     download_dir = os.path.abspath(os.path.join(base_dir, dataset_type))
-    download_path = os.path.join(download_dir, "{}.hdf5".format(task))
+    download_path = os.path.join(download_dir, f"{task}.hdf5")
     print(
-        "\nDownloading dataset:\n    dataset type: {}\n    task: {}\n    download path: {}".format(
-            dataset_type, task, download_path
-        )
+        f"\nDownloading dataset:\n    dataset type: {dataset_type}\n    task: {task}\n    download path: {download_path}"
     )
+
     url = DATASET_REGISTRY[dataset_type][task]["url"]
     # Make sure path exists and create if it doesn't
     os.makedirs(download_dir, exist_ok=True)
@@ -125,7 +124,7 @@ def make_lerobot_dataset(task, dataset_path, output_dir, img_height=256, img_wid
 
     # each demonstration is a group under "data"
     demos = list(mg_file["data"].keys())
-    print("hdf5 file {} has {} demonstrations".format(dataset_path, len(demos)))
+    print(f"hdf5 file {dataset_path} has {len(demos)} demonstrations")
 
     ### initialize the env to reproduce the demonstrations
 
@@ -174,17 +173,17 @@ def make_lerobot_dataset(task, dataset_path, output_dir, img_height=256, img_wid
         # robosuite datasets store the ground-truth simulator states under the "states" key.
         # We will use the first one, alone with the model xml, to reset the environment to
         # the initial configuration before playing back actions.
-        init_state = mg_file["data/{}/states".format(demo_key)][0]
-        model_xml = mg_file["data/{}".format(demo_key)].attrs["model_file"]
+        init_state = mg_file[f"data/{demo_key}/states"][0]
+        model_xml = mg_file[f"data/{demo_key}"].attrs["model_file"]
         initial_state_dict = dict(states=init_state, model=model_xml)
-        action_mat = mg_file["data/{}/actions".format(demo_key)][:]
+        action_mat = mg_file[f"data/{demo_key}/actions"][:]
 
         ep_dict, image_obs, is_success = rollout_episode(env, initial_state_dict, action_mat)
         ep_len = ep_dict["action"].shape[0]
 
         # ep_idx = int(demo_key.split("_")[-1])
         ep_dict["episode_index"] = torch.tensor([ep_idx] * ep_len, dtype=torch.int64)
-        ep_success[ep_idx] = {"demo_key": demo_key, "is_success": is_success}
+        ep_success[ep_idx] = {"demo_key": demo_key, "is_success": bool(is_success)}
 
         for img_key in env.image_keys:
             save_images_concurrently(
@@ -305,7 +304,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--task",
         type=str,
-        default="stack",
+        default="nut_assembly",
         help="Task to download datasets for. Defaults to stack task.",
     )
 
