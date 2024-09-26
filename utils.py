@@ -150,7 +150,13 @@ class MimicgenWrapper:
 
         state_obs_list = []
         for k in self.state_keys:
-            state_obs_list.append(np.array(obs[k]))
+            obs_array = np.array(obs[k])
+            if obs_array.ndim == 0:
+                obs_array = np.expand_dims(obs_array, axis=0)
+
+            assert obs_array.ndim == 1, "State observations must be 1-dimensional"
+            state_obs_list.append(obs_array)
+
         obs_dict.update({"agent_pos": np.concatenate(state_obs_list)})
 
         self.obs = obs_dict
