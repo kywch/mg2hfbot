@@ -21,6 +21,7 @@ dependencies = [
     "mujoco==2.3.2",  # see https://mimicgen.github.io/docs/introduction/installation.html#mujoco
     "robosuite==1.4.1",
     "robomimic@git+https://github.com/ARISE-Initiative/robomimic.git",
+    "robosuite_task_zoo@git+https://github.com/kywch/robosuite-task-zoo.git",
     "lerobot@git+https://github.com/kywch/lerobot.git",
     "wandb",
 ]

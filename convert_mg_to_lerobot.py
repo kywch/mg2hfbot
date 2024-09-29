@@ -12,7 +12,7 @@ import numpy as np
 import torch
 import h5py
 
-from mimicgen import DATASET_REGISTRY
+from mimicgen import DATASET_REGISTRY, HF_REPO_ID
 import mimicgen.utils.file_utils as FileUtils
 
 import robomimic.utils.env_utils as EnvUtils
@@ -23,25 +23,20 @@ import robomimic.utils.obs_utils as ObsUtils
 from datasets import Dataset, Features, Sequence, Value
 from lerobot.common.datasets.compute_stats import compute_stats
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.common.datasets.push_dataset_to_hub.utils import (
-    concatenate_episodes,
-    save_images_concurrently,
-)
-from lerobot.common.datasets.utils import (
-    hf_transform_to_torch,
-)
+from lerobot.common.datasets.push_dataset_to_hub.utils import concatenate_episodes
+from lerobot.common.datasets.utils import hf_transform_to_torch
 from lerobot.common.datasets.video_utils import VideoFrame, encode_video_frames
-from lerobot.scripts.push_dataset_to_hub import (
-    # push_meta_data_to_hub,
-    # push_videos_to_hub,
-    save_meta_data,
-)
+from lerobot.scripts.push_dataset_to_hub import save_meta_data
 
-from utils import ENV_META_DIR, MimicgenWrapper
+from utils import ENV_META_DIR, MimicgenWrapper, save_images_concurrently, push_to_hub
 
 
 NUM_WORKERS = 8
 ENV_CONFIG_DIR = Path("./configs/env")
+
+IMAGE_OBS_SIZE = (256, 256)
+SMALL_IMAGE_OBS_POSTFIX = "_lowres"
+SMALL_IMAGE_OBS_SIZE = (96, 96)
 
 
 def download_mimicgen_dataset(base_dir, task, dataset_type="source", overwrite=False):
@@ -62,8 +57,9 @@ def download_mimicgen_dataset(base_dir, task, dataset_type="source", overwrite=F
         return download_path
 
     print("")
-    FileUtils.download_url_from_gdrive(
-        url=url,
+    FileUtils.download_file_from_hf(
+        repo_id=HF_REPO_ID,
+        filename=url,
         download_dir=download_dir,
         check_overwrite=True,
     )
@@ -79,6 +75,8 @@ def rollout_episode(env, initial_state_dict, action_mat, follow_through=30, use_
     # NOTE: mimicgen wrapper only returns pixels and agent_pos
     image_obs = {k: [] for k in env.image_keys}
     state_obs = []
+    rewards = []
+    successes = []
 
     # playback actions one by one, and follow through for a few more steps
 
@@ -95,6 +93,13 @@ def rollout_episode(env, initial_state_dict, action_mat, follow_through=30, use_
             image_obs[key].append(obs["pixels"][key])
         state_obs.append(obs["agent_pos"])
 
+        rewards.append(reward)
+
+        # CHECK ME: this is the "frame-level" success, which is different from the episode-level success
+        # The episode-level success is defined as all of the last 30 frames being successes,
+        # meaning a stable success state, like the stacked block staying in place.
+        successes.append(env.success_history[-1])
+
     if use_tqdm is True:
         for action in tqdm(mod_action):
             step(action)
@@ -110,7 +115,9 @@ def rollout_episode(env, initial_state_dict, action_mat, follow_through=30, use_
     ep_dict["action"] = torch.tensor(mod_action)
     ep_dict["next.done"] = torch.zeros(ep_len, dtype=torch.bool)
     ep_dict["next.done"][-1] = True
-
+    ep_dict["next.reward"] = torch.tensor(np.array(rewards))
+    ep_dict["next.success"] = torch.tensor(np.array(successes))
+    
     # NOTE: assuming every demo is reproduced. Add error handling if not true?
     ep_dict["frame_index"] = torch.arange(ep_len, dtype=torch.int64)  # start from 0
     ep_dict["timestamp"] = torch.tensor(timestamps)
@@ -185,19 +192,28 @@ def make_lerobot_dataset(task, dataset_path, output_dir, img_height=256, img_wid
         ep_dict["episode_index"] = torch.tensor([ep_idx] * ep_len, dtype=torch.int64)
         ep_success[ep_idx] = {"demo_key": demo_key, "is_success": bool(is_success)}
 
+        # Convert the images into full-size and low-res videos
         for img_key in env.image_keys:
             save_images_concurrently(
                 image_obs[img_key],
                 Path(f"{output_dir}/images/{img_key}_episode_{ep_idx:06d}"),
-                NUM_WORKERS,
+                lowres_out_dir=Path(f"{output_dir}/images/{img_key}_episode_{ep_idx:06d}_lowres"),
+                lowres_size=SMALL_IMAGE_OBS_SIZE,
+                max_workers=NUM_WORKERS,
             )
             fname = f"{img_key}_episode_{ep_idx:06d}.mp4"
+            fname_lowres = f"{img_key}_episode_{ep_idx:06d}_lowres.mp4"
 
             # store the reference to the video frame
-            ep_dict[f"observation.images.{img_key}"] = [
-                {"path": f"videos/{fname}", "timestamp": tstp}
-                for tstp in ep_dict["timestamp"].tolist()
-            ]
+            ep_dict[f"observation.images.{img_key}"] = []
+            ep_dict[f"observation.images.{img_key}_lowres"] = []
+            for tstp in ep_dict["timestamp"].tolist():
+                ep_dict[f"observation.images.{img_key}"].append(
+                    {"path": f"videos/{fname}", "timestamp": tstp}
+                )
+                ep_dict[f"observation.images.{img_key}_lowres"].append(
+                    {"path": f"videos/{fname_lowres}", "timestamp": tstp}
+                )
 
         ep_dicts.append(ep_dict)
         episode_data_index["from"].append(id_from)
@@ -236,11 +252,14 @@ def make_lerobot_dataset(task, dataset_path, output_dir, img_height=256, img_wid
     features["frame_index"] = Value(dtype="int64", id=None)
     features["timestamp"] = Value(dtype="float32", id=None)
     features["next.done"] = Value(dtype="bool", id=None)
+    features["next.reward"] = Value(dtype="float32", id=None)
+    features["next.success"] = Value(dtype="bool", id=None)
     features["index"] = Value(dtype="int64", id=None)
 
     hf_dataset = Dataset.from_dict(data_dict, features=Features(features))
     hf_dataset.set_transform(hf_transform_to_torch)
 
+    # CHECK ME: Add image resolution info here?
     info = {
         "fps": fps,
         "video": 1,
@@ -302,13 +321,26 @@ if __name__ == "__main__":
 
     # single task to download and convert dataset for
     parser.add_argument(
+        "-t",
         "--task",
         type=str,
-        default="nut_assembly",
+        default="coffee",
         help="Task to download datasets for. Defaults to stack task.",
     )
 
-    # TODO: add push to hub args
+    parser.add_argument(
+        "-p", 
+        "--push_to_hub",
+        action="store_true",
+        help="Whether to push the converted dataset to the hub.",
+    )
+
+    parser.add_argument(
+        "--dataset_repo_prefix",
+        type=str,
+        default="kywch/mimicgen",
+        help="Dataset repo id prefix to push to.",
+    )
 
     args = parser.parse_args()
 
@@ -329,3 +361,6 @@ if __name__ == "__main__":
     output_dir = Path(f"{args.output_dir}/{download_task}")
     output_dir.mkdir(parents=True, exist_ok=True)
     make_lerobot_dataset(download_task, dataset_path, output_dir)
+
+    if args.push_to_hub:
+        push_to_hub(output_dir, repo_id=f"{args.dataset_repo_prefix}_{download_task}")

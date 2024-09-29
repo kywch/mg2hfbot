@@ -3,6 +3,9 @@ from pathlib import Path
 from collections import deque
 from omegaconf import OmegaConf, DictConfig
 
+from concurrent.futures import ThreadPoolExecutor
+import PIL
+
 import gymnasium as gym
 from gymnasium import spaces
 
@@ -18,7 +21,10 @@ from lerobot.common.datasets.factory import resolve_delta_timestamps
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.common.datasets.utils import hf_transform_to_torch
 from lerobot.common.datasets.transforms import get_image_transforms
-
+from lerobot.scripts.push_dataset_to_hub import (
+    push_meta_data_to_hub,
+    push_videos_to_hub,
+)
 
 ENV_META_DIR = Path("./env_meta")
 
@@ -182,14 +188,15 @@ class MimicgenWrapper:
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
 
+        # NOTE: This checks if the current tick state is a success
         check_success = self.env.is_success()
         self.success_history.append(check_success["task"])
 
         # The task is done when the success history is full of 1s
         # NOTE: It's possible that the robot succeeded at the very end, so the history may not be full of 1s
         # Then, it will be considered as a failure.
-        done = is_success = self.is_success()
-        info = {"is_success": is_success}
+        done = episode_success = self.is_success()
+        info = {"is_success": episode_success}
 
         self.tick += 1
         truncated = False
@@ -256,3 +263,36 @@ def make_mimicgen_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.
     #     ]
     # )
     # return vec_env
+
+
+def save_images_concurrently(
+        imgs_array: np.array,
+        out_dir: Path,
+        lowres_out_dir: Path | None = None,
+        lowres_size: tuple[int, int] | None = None,
+        max_workers: int = 4
+    ):
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if lowres_out_dir is not None:
+        lowres_out_dir = Path(lowres_out_dir)
+        lowres_out_dir.mkdir(parents=True, exist_ok=True)
+
+    def save_image(img_array, i, out_dir):
+        img = PIL.Image.fromarray(img_array)
+        img.save(str(out_dir / f"frame_{i:06d}.png"), quality=100)
+
+        if lowres_out_dir is not None:
+            lowres_img = img.resize(lowres_size)
+            lowres_img.save(str(lowres_out_dir / f"frame_{i:06d}.png"), quality=100)
+
+    num_images = len(imgs_array)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        [executor.submit(save_image, imgs_array[i], i, out_dir) for i in range(num_images)]
+
+def push_to_hub(data_dir, repo_id, revision="main"):
+    hf_dataset = Dataset.load_from_disk(Path(f"{data_dir}/hf_data"))
+    hf_dataset.push_to_hub(repo_id, token=True, revision=revision)
+
+    push_meta_data_to_hub(repo_id, f"{data_dir}/meta_data", revision=revision)
+    push_videos_to_hub(repo_id, f"{data_dir}/videos", revision=revision)

@@ -1,0 +1,27 @@
+fps: 20
+env:
+  name: mimicgen
+  task: CoffeePreparation_D0
+  state_dim: 145
+  action_dim: 7
+  episode_length: 850
+  meta: coffee_preparation_env.json
+  image_keys:
+  - agentview
+  - robot0_eye_in_hand
+  state_keys:
+  - robot0_joint_pos
+  - robot0_joint_pos_cos
+  - robot0_joint_pos_sin
+  - robot0_joint_vel
+  - robot0_eef_pos
+  - robot0_eef_quat
+  - robot0_eef_vel_lin
+  - robot0_eef_vel_ang
+  - robot0_gripper_qpos
+  - robot0_gripper_qvel
+  - robot0_eef_pos_rel_pod
+  - robot0_eef_quat_rel_pod
+  - robot0_eef_pos_rel_pod_holder
+  - robot0_eef_quat_rel_pod_holder
+  - object
