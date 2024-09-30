@@ -100,7 +100,7 @@ def rollout_episode(env, initial_state_dict, action_mat, follow_through=30, use_
         # meaning a stable success state, like the stacked block staying in place.
         successes.append(env.success_history[-1])
 
-    if use_tqdm is True:
+    if use_tqdm:
         for action in tqdm(mod_action):
             step(action)
     else:

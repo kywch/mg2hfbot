@@ -97,13 +97,24 @@ def make_dataset_from_local(cfg, root_dir=".", split: str = "train") -> LeRobotD
 
 # CHECK ME: Is this the right place? Revisit later
 class MimicgenWrapper:
-    def __init__(self, env, env_cfg, env_meta, episode_length=200, success_criteria=30):
+    def __init__(self,
+                 env,
+                 env_cfg,
+                 env_meta,
+                 episode_length=200,
+                 success_criteria=30,
+                 lowres_image_obs=False,
+                 lowres_image_size=(96, 96)):
         self.env = env
         self.cfg = env_cfg
         self.env_meta = env_meta
         self.image_keys = env_cfg.image_keys
         self.state_keys = env_cfg.state_keys
         self.success_history = deque(maxlen=success_criteria)
+
+        # NOTE: diffusion model uses lowres image for training, so the policy needs the lowres for eval
+        self.lowres_image_obs = lowres_image_obs
+        self.lowres_size = lowres_image_size
 
         self._max_episode_steps = episode_length
         if "episode_length" in env_cfg:
@@ -119,23 +130,30 @@ class MimicgenWrapper:
         self.obs = None
 
         # TODO: consider making this from the config or env_meta
+        pixel_obs_space = {}
+        for k in self.image_keys:
+            pixel_obs_space[k] = spaces.Box(
+                low=0,
+                high=255,
+                shape=(
+                    self.env_meta["env_kwargs"]["camera_heights"],
+                    self.env_meta["env_kwargs"]["camera_widths"],
+                    3,
+                ),
+                dtype=np.uint8,
+            )
+
+            if self.lowres_image_obs:
+                pixel_obs_space[f"{k}_lowres"] = spaces.Box(
+                    low=0,
+                    high=255,
+                    shape=(self.lowres_size[0], self.lowres_size[1], 3),
+                    dtype=np.uint8,
+                )
+
         self.observation_space = spaces.Dict(
             {
-                "pixels": spaces.Dict(
-                    {
-                        k: spaces.Box(
-                            low=0,
-                            high=255,
-                            shape=(
-                                self.env_meta["env_kwargs"]["camera_heights"],
-                                self.env_meta["env_kwargs"]["camera_widths"],
-                                3,
-                            ),
-                            dtype=np.uint8,
-                        )
-                        for k in self.image_keys
-                    }
-                ),
+                "pixels": spaces.Dict(pixel_obs_space),
                 "agent_pos": spaces.Box(
                     low=-1000.0, high=1000.0, shape=(self.cfg.state_dim,), dtype=np.float64
                 ),
@@ -147,12 +165,14 @@ class MimicgenWrapper:
         )
 
     def _process_obs(self, obs):
-        obs_dict = {
-            "pixels": {
-                k: (np.transpose(obs[f"{k}_image"], (1, 2, 0)) * 255).astype(np.uint8)
-                for k in self.image_keys
-            }
-        }
+        obs_dict = {"pixels": {}}
+        for k in self.image_keys:
+            img_array = (np.transpose(obs[f"{k}_image"], (1, 2, 0)) * 255).astype(np.uint8)
+            obs_dict["pixels"][k] = img_array
+            
+            if self.lowres_image_obs:
+                pil_img = PIL.Image.fromarray(img_array)
+                obs_dict["pixels"][f"{k}_lowres"] = np.array(pil_img.resize(self.lowres_size))
 
         state_obs_list = []
         for k in self.state_keys:
@@ -200,7 +220,7 @@ class MimicgenWrapper:
 
         self.tick += 1
         truncated = False
-        if done is False and self.tick >= self._max_episode_steps:
+        if not done and self.tick > self._max_episode_steps:
             truncated = True
 
         return self._process_obs(obs), reward, done, truncated, info
@@ -236,6 +256,9 @@ def make_mimicgen_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.
     with open(env_meta_file, "r") as f:
         env_meta = json.load(f)
 
+    # use lowres image for eval?
+    lowres_image_obs = cfg.eval.get("lowres_image_obs", False)
+
     def env_creator():
         env = EnvUtils.create_env_from_metadata(
             env_meta=env_meta,
@@ -243,8 +266,9 @@ def make_mimicgen_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.
             render_offscreen=True,  # off-screen rendering to support rendering video frames
             use_image_obs=True,
         )
+
         # return env
-        return MimicgenWrapper(env, cfg.env, env_meta)
+        return MimicgenWrapper(env, cfg.env, env_meta, lowres_image_obs=lowres_image_obs)
 
     # NOTE: mimicgen disables max horizon (see ignore_done). Change in the mimicgen repo if needed.
     # if cfg.env.get("episode_length"):
