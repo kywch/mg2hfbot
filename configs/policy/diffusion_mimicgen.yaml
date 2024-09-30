@@ -5,8 +5,7 @@
 #       https://github.com/huggingface/lerobot/pull/134 for more details.
 
 seed: 100000
-#dataset_repo_id: converted/stack_d0
-dataset_repo_id: converted/coffee
+dataset_repo_id: converted/stack_d0
 
 # override_dataset_stats:
 #   # TODO(rcadene, alexander-soare): should we remove image stats as well? do we use a pretrained vision model?
@@ -25,8 +24,7 @@ dataset_repo_id: converted/coffee
 training:
   offline_steps: 200000
   online_steps: 0
-  # eval_freq: 25000
-  eval_freq: 10
+  eval_freq: 25000
   save_freq: 25000
   save_checkpoint: true
 
