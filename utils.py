@@ -11,7 +11,7 @@ import torch
 from datasets import Dataset
 from safetensors.torch import load_file, safe_open
 
-import mimicgen
+import mimicgen  # noqa
 import robomimic.utils.env_utils as EnvUtils
 import robomimic.utils.obs_utils as ObsUtils
 
@@ -150,12 +150,12 @@ def make_mimicgen_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.
 
 
 def save_images_concurrently(
-        imgs_array: np.array,
-        out_dir: Path,
-        lowres_out_dir: Path | None = None,
-        lowres_size: tuple[int, int] | None = None,
-        max_workers: int = 4
-    ):
+    imgs_array: np.array,
+    out_dir: Path,
+    lowres_out_dir: Path | None = None,
+    lowres_size: tuple[int, int] | None = None,
+    max_workers: int = 4,
+):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     if lowres_out_dir is not None:
@@ -173,6 +173,7 @@ def save_images_concurrently(
     num_images = len(imgs_array)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         [executor.submit(save_image, imgs_array[i], i, out_dir) for i in range(num_images)]
+
 
 def push_to_hub(data_dir, repo_id, revision="main"):
     hf_dataset = Dataset.load_from_disk(Path(f"{data_dir}/hf_data"))
