@@ -15,7 +15,6 @@ classifiers = [
 	"Programming Language :: Python :: 3.10",
 ]
 
-# versions are pinned by pufferlib
 dependencies = [
     "mimicgen@git+https://github.com/kywch/mimicgen.git",
     "mujoco==2.3.2",  # see https://mimicgen.github.io/docs/introduction/installation.html#mujoco
