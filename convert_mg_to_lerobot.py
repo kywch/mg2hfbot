@@ -68,12 +68,18 @@ def download_mimicgen_dataset(base_dir, task, dataset_type="source", overwrite=F
     return download_path
 
 
-def rollout_episode(trans_env, repro_env, initial_state_dict, action_mat, follow_through=30, use_tqdm=False):
+def rollout_episode(
+    trans_env, repro_env, initial_state_dict, action_mat, follow_through=30, use_tqdm=False
+):
     # reset to initial state
     trans_obs = trans_env.reset_to(initial_state_dict)
     repro_obs, _ = repro_env.reset_to(initial_state_dict)
-    assert np.array_equal(repro_env.eef_pos, trans_obs["robot0_eef_pos"]), "Repro env and trans env have different eef pos"
-    assert np.array_equal(repro_env.eef_quat, trans_obs["robot0_eef_quat"]), "Repro env and trans env have different eef quat"
+    assert np.array_equal(
+        repro_env.eef_pos, trans_obs["robot0_eef_pos"]
+    ), "Repro env and trans env have different eef pos"
+    assert np.array_equal(
+        repro_env.eef_quat, trans_obs["robot0_eef_quat"]
+    ), "Repro env and trans env have different eef quat"
 
     # init buffers
     # NOTE: mimicgen wrapper only returns pixels and agent_pos
@@ -135,7 +141,7 @@ def rollout_episode(trans_env, repro_env, initial_state_dict, action_mat, follow
     ep_dict["next.done"][-1] = True
     ep_dict["next.reward"] = torch.tensor(np.array(rewards))
     ep_dict["next.success"] = torch.tensor(np.array(successes))
-    
+
     # NOTE: assuming every demo is reproduced. Add error handling if not true?
     ep_dict["frame_index"] = torch.arange(ep_len, dtype=torch.int64)  # start from 0
     ep_dict["timestamp"] = torch.tensor(timestamps)
@@ -144,7 +150,9 @@ def rollout_episode(trans_env, repro_env, initial_state_dict, action_mat, follow
 
 
 # NOTE: Using only single env due to technical difficuties
-def make_lerobot_dataset(task, dataset_path, output_dir, img_height=256, img_width=256):
+def make_lerobot_dataset(
+    task, dataset_path, output_dir, num_demos=None, img_height=256, img_width=256
+):
     mg_file = h5py.File(dataset_path, "r")
 
     # each demonstration is a group under "data"
@@ -205,6 +213,9 @@ def make_lerobot_dataset(task, dataset_path, output_dir, img_height=256, img_wid
     id_from = 0
     ep_success = {}
 
+    if num_demos is not None:
+        demos = demos[:num_demos]
+
     print("Replaying actions...")
     for ep_idx, demo_key in tqdm(enumerate(demos), total=len(demos)):
         # robosuite datasets store the ground-truth simulator states under the "states" key.
@@ -215,7 +226,9 @@ def make_lerobot_dataset(task, dataset_path, output_dir, img_height=256, img_wid
         initial_state_dict = dict(states=init_state, model=model_xml)
         action_mat = mg_file[f"data/{demo_key}/actions"][:]
 
-        ep_dict, image_obs, is_success = rollout_episode(trans_env, repro_env, initial_state_dict, action_mat)
+        ep_dict, image_obs, is_success = rollout_episode(
+            trans_env, repro_env, initial_state_dict, action_mat
+        )
         ep_len = ep_dict["action"].shape[0]
 
         # ep_idx = int(demo_key.split("_")[-1])
@@ -324,7 +337,9 @@ def make_lerobot_dataset(task, dataset_path, output_dir, img_height=256, img_wid
         json.dump(ep_success, f, indent=2)
 
     num_success = sum(1 for ep_success in ep_success.values() if ep_success["is_success"])
-    print(f"Finished converting the mimicgen {task} dataset to lerobot dataset. Success rate: {num_success}/{len(ep_success)}")
+    print(
+        f"Finished converting the mimicgen {task} dataset to lerobot dataset. Success rate: {num_success}/{len(ep_success)}"
+    )
 
 
 if __name__ == "__main__":
@@ -363,8 +378,17 @@ if __name__ == "__main__":
         help="Task to download datasets for. Defaults to stack task.",
     )
 
+    # limit the number of demos to convert
     parser.add_argument(
-        "-p", 
+        "-n",
+        "--num_demos",
+        type=int,
+        default=5,  # None,
+        help="Limit the number of demos to convert. Defaults to None (all demos).",
+    )
+
+    parser.add_argument(
+        "-p",
         "--push_to_hub",
         action="store_true",
         help="Whether to push the converted dataset to the hub.",
@@ -395,7 +419,7 @@ if __name__ == "__main__":
     # convert to lerobot
     output_dir = Path(f"{args.output_dir}/{download_task}")
     output_dir.mkdir(parents=True, exist_ok=True)
-    make_lerobot_dataset(download_task, dataset_path, output_dir)
+    make_lerobot_dataset(download_task, dataset_path, output_dir, num_demos=args.num_demos)
 
     if args.push_to_hub:
         push_to_hub(output_dir, repo_id=f"{args.dataset_repo_prefix}_{download_task}")
