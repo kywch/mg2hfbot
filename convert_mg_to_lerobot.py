@@ -28,7 +28,7 @@ from lerobot.common.datasets.utils import hf_transform_to_torch
 from lerobot.common.datasets.video_utils import VideoFrame, encode_video_frames
 from lerobot.scripts.push_dataset_to_hub import save_meta_data
 
-from utils import ENV_META_DIR, save_images_concurrently, push_to_hub
+from utils import ENV_META_DIR, save_images_concurrently, push_to_hub, save_states_to_hdf5
 from env import MimicgenWrapper
 
 
@@ -69,17 +69,24 @@ def download_mimicgen_dataset(base_dir, task, dataset_type="source", overwrite=F
 
 
 def rollout_episode(
-    trans_env, repro_env, initial_state_dict, action_mat, follow_through=30, use_tqdm=False
+    trans_env,
+    repro_env,
+    initial_state_dict,
+    action_mat,
+    convert_to_absolute_actions=False,
+    follow_through=30,
+    use_tqdm=False,
 ):
     # reset to initial state
-    trans_obs = trans_env.reset_to(initial_state_dict)
     repro_obs, _ = repro_env.reset_to(initial_state_dict)
-    assert np.array_equal(
-        repro_env.eef_pos, trans_obs["robot0_eef_pos"]
-    ), "Repro env and trans env have different eef pos"
-    assert np.array_equal(
-        repro_env.eef_quat, trans_obs["robot0_eef_quat"]
-    ), "Repro env and trans env have different eef quat"
+    if convert_to_absolute_actions:
+        trans_obs = trans_env.reset_to(initial_state_dict)
+        assert np.array_equal(
+            repro_env.eef_pos, trans_obs["robot0_eef_pos"]
+        ), "Repro env and trans env have different eef pos"
+        assert np.array_equal(
+            repro_env.eef_quat, trans_obs["robot0_eef_quat"]
+        ), "Repro env and trans env have different eef quat"
 
     # init buffers
     # NOTE: mimicgen wrapper only returns pixels and agent_pos
@@ -98,11 +105,12 @@ def rollout_episode(
     mod_action = np.vstack([action_mat, final_action])
 
     def step(action):
-        trans_obs, _, _, _ = trans_env.step(action)
-
-        goal_pos = trans_env.env.robots[0].controller.goal_pos
-        goal_ori = T.quat2axisangle(T.mat2quat(trans_env.env.robots[0].controller.goal_ori))
-        new_action = np.concatenate((goal_pos, goal_ori, (action[-1],)))
+        new_action = action
+        if convert_to_absolute_actions:
+            trans_obs, _, _, _ = trans_env.step(action)
+            goal_pos = trans_env.env.robots[0].controller.goal_pos
+            goal_ori = T.quat2axisangle(T.mat2quat(trans_env.env.robots[0].controller.goal_ori))
+            new_action = np.concatenate((goal_pos, goal_ori, (action[-1],)))
 
         repro_obs, reward, done, trunc, info = repro_env.step(new_action)
 
@@ -151,7 +159,13 @@ def rollout_episode(
 
 # NOTE: Using only single env due to technical difficuties
 def make_lerobot_dataset(
-    task, dataset_path, output_dir, num_demos=None, img_height=256, img_width=256
+    task,
+    dataset_path,
+    output_dir,
+    num_demos=None,
+    img_height=256,
+    img_width=256,
+    convert_to_absolute_actions=False,
 ):
     mg_file = h5py.File(dataset_path, "r")
 
@@ -171,8 +185,11 @@ def make_lerobot_dataset(
     env_meta = json.loads(mg_file["data"].attrs["env_args"])
     env_meta["env_kwargs"]["camera_heights"] = img_height
     env_meta["env_kwargs"]["camera_widths"] = img_width
+
     # Set controller to take absolute actions
-    env_meta["env_kwargs"]["controller_configs"]["control_delta"] = False
+    if convert_to_absolute_actions:
+        env_meta["env_kwargs"]["controller_configs"]["control_delta"] = False
+
     with open(ENV_META_DIR / f"{task}_env.json", "w") as f:
         json.dump(env_meta, f, indent=2)
 
@@ -191,13 +208,15 @@ def make_lerobot_dataset(
 
     # LeRobot expects actions to be in absolute coordinates
     # This is the env that we'll use to translate delta actions to absolute actions
-    trans_env_meta = json.loads(mg_file["data"].attrs["env_args"])
-    trans_env = EnvUtils.create_env_from_metadata(
-        env_meta=trans_env_meta,
-        render=False,  # no on-screen rendering
-        render_offscreen=False,  # No need to render anything
-        use_image_obs=False,
-    )
+    trans_env = None
+    if convert_to_absolute_actions:
+        trans_env_meta = json.loads(mg_file["data"].attrs["env_args"])
+        trans_env = EnvUtils.create_env_from_metadata(
+            env_meta=trans_env_meta,
+            render=False,  # no on-screen rendering
+            render_offscreen=False,  # No need to render anything
+            use_image_obs=False,
+        )
 
     repro_env = EnvUtils.create_env_from_metadata(
         env_meta=env_meta,
@@ -212,6 +231,7 @@ def make_lerobot_dataset(
     episode_data_index = {"from": [], "to": []}
     id_from = 0
     ep_success = {}
+    initial_states = []
 
     if num_demos is not None:
         demos = demos[:num_demos]
@@ -224,10 +244,12 @@ def make_lerobot_dataset(
         init_state = mg_file[f"data/{demo_key}/states"][0]
         model_xml = mg_file[f"data/{demo_key}"].attrs["model_file"]
         initial_state_dict = dict(states=init_state, model=model_xml)
+        initial_states.append(initial_state_dict)
+
         action_mat = mg_file[f"data/{demo_key}/actions"][:]
 
         ep_dict, image_obs, is_success = rollout_episode(
-            trans_env, repro_env, initial_state_dict, action_mat
+            trans_env, repro_env, initial_state_dict, action_mat, convert_to_absolute_actions
         )
         ep_len = ep_dict["action"].shape[0]
 
@@ -267,7 +289,8 @@ def make_lerobot_dataset(
         id_from += ep_len
 
     # finished collecting data
-    trans_env.env.close()
+    if convert_to_absolute_actions:
+        trans_env.env.close()
     repro_env.close()
 
     # convert images into videos
@@ -336,9 +359,11 @@ def make_lerobot_dataset(
     with open(Path(f"{output_dir}/meta_data/ep_success.json"), "w") as f:
         json.dump(ep_success, f, indent=2)
 
+    save_states_to_hdf5(Path(f"{output_dir}/meta_data/init_states.hdf5"), initial_states)
+
     num_success = sum(1 for ep_success in ep_success.values() if ep_success["is_success"])
     print(
-        f"Finished converting the mimicgen {task} dataset to lerobot dataset. Success rate: {num_success}/{len(ep_success)}"
+        f"Finished converting the mimicgen {task} dataset to lerobot dataset. Reproduction success rate: {num_success}/{len(ep_success)}"
     )
 
 
@@ -378,12 +403,20 @@ if __name__ == "__main__":
         help="Task to download datasets for. Defaults to stack task.",
     )
 
+    parser.add_argument(
+        "-c",
+        "--convert_to_absolute_actions",
+        type=bool,
+        default=False,
+        help="Whether to convert the actions to absolute actions. Defaults to False.",
+    )
+
     # limit the number of demos to convert
     parser.add_argument(
         "-n",
         "--num_demos",
         type=int,
-        default=5,  # None,
+        default=None,
         help="Limit the number of demos to convert. Defaults to None (all demos).",
     )
 

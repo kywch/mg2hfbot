@@ -5,14 +5,17 @@ import PIL
 
 
 class MimicgenWrapper:
-    def __init__(self,
-                 env,
-                 env_cfg,
-                 env_meta,
-                 episode_length=200,
-                 success_criteria=30,
-                 lowres_image_obs=False,
-                 lowres_image_size=(96, 96)):
+    def __init__(
+        self,
+        env,
+        env_cfg,
+        env_meta,
+        episode_length=200,
+        success_criteria=30,
+        lowres_image_obs=False,
+        lowres_image_size=(96, 96),
+        eval_init_states=None,
+    ):
         self.env = env
         self.cfg = env_cfg
         self.env_meta = env_meta
@@ -23,6 +26,9 @@ class MimicgenWrapper:
         # NOTE: diffusion model uses lowres image for training, so the policy needs the lowres for eval
         self.lowres_image_obs = lowres_image_obs
         self.lowres_size = lowres_image_size
+
+        self.eval_init_states = eval_init_states
+        self.eval_idx = None if eval_init_states is None else 0
 
         self._max_episode_steps = episode_length
         if "episode_length" in env_cfg:
@@ -80,7 +86,7 @@ class MimicgenWrapper:
         for k in self.image_keys:
             img_array = (np.transpose(obs[f"{k}_image"], (1, 2, 0)) * 255).astype(np.uint8)
             obs_dict["pixels"][k] = img_array
-            
+
             if self.lowres_image_obs:
                 pil_img = PIL.Image.fromarray(img_array)
                 obs_dict["pixels"][f"{k}_lowres"] = np.array(pil_img.resize(self.lowres_size))
@@ -110,9 +116,15 @@ class MimicgenWrapper:
         return {"is_success": False}  # dummy info
 
     def reset(self, seed=None, options=None):
-        info = self._reset_and_get_info()
         # NOTE: EnvRobosuite reset() does NOT take seed
-        obs = self.env.reset()
+        info = self._reset_and_get_info()
+        if self.eval_init_states is not None:
+            obs = self.env.reset_to(self.eval_init_states[self.eval_idx])
+            self.eval_idx += 1
+            self.eval_idx = self.eval_idx % len(self.eval_init_states)
+        else:
+            obs = self.env.reset()
+
         return self._process_obs(obs), info
 
     def reset_to(self, initial_state_dict):

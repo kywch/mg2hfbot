@@ -49,7 +49,7 @@ from lerobot.scripts.train import (
     log_eval_info,
 )
 
-from utils import make_dataset_from_local, make_mimicgen_env
+from utils import make_dataset_from_local, make_mimicgen_env, load_states_from_hdf5
 
 
 def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = None):
@@ -106,8 +106,18 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
     # using the eval.py instead, with gym_dora environment and dora-rs.
     eval_env = None
     if cfg.training.eval_freq > 0:
+        use_training_episodes = cfg.eval.get("use_training_episodes", False)
+        eval_init_states = None
+        if use_training_episodes:
+            # NOTE: load the init states from the meta data dir
+            # once we feed in the initial states, the same states will be used throughout the eval
+            eval_init_states = load_states_from_hdf5(
+                Path(cfg.dataset_repo_id) / "meta_data" / "init_states.hdf5"
+            )
+            eval_init_states = eval_init_states[: cfg.eval.n_episodes]
+
         logging.info("make_env")
-        eval_env = make_mimicgen_env(cfg)
+        eval_env = make_mimicgen_env(cfg, eval_init_states=eval_init_states)
 
     logging.info("make_policy")
     policy = make_policy(

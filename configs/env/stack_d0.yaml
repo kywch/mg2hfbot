@@ -8,7 +8,7 @@ env:
   state_dim: 9
   action_dim: 7
   episode_length: 200
-  meta: stack_env.json
+  meta: stack_d0_env.json
   image_keys:
   - agentview
   - robot0_eye_in_hand

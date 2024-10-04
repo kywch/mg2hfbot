@@ -4,6 +4,7 @@ from omegaconf import OmegaConf, DictConfig
 
 from concurrent.futures import ThreadPoolExecutor
 import PIL
+import h5py
 
 import gymnasium as gym
 import numpy as np
@@ -95,11 +96,15 @@ def make_dataset_from_local(cfg, root_dir=".", split: str = "train") -> LeRobotD
     return dataset
 
 
-def make_mimicgen_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.VectorEnv | None:
+def make_mimicgen_env(
+    cfg: DictConfig, eval_init_states: list[dict] | None = None, n_envs: int | None = None
+) -> gym.vector.VectorEnv | None:
     """Makes a gym vector environment according to the evaluation config.
 
     n_envs can be used to override eval.batch_size in the configuration. Must be at least 1.
     """
+
+    # NOTE: ignoring n_envs for now
     if n_envs is not None and n_envs < 1:
         raise ValueError("`n_envs must be at least 1")
 
@@ -128,7 +133,13 @@ def make_mimicgen_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.
         )
 
         # return env
-        return MimicgenWrapper(env, cfg.env, env_meta, lowres_image_obs=lowres_image_obs)
+        return MimicgenWrapper(
+            env,
+            cfg.env,
+            env_meta,
+            lowres_image_obs=lowres_image_obs,
+            eval_init_states=eval_init_states,
+        )
 
     # NOTE: mimicgen disables max horizon (see ignore_done). Change in the mimicgen repo if needed.
     # if cfg.env.get("episode_length"):
@@ -181,3 +192,26 @@ def push_to_hub(data_dir, repo_id, revision="main"):
 
     push_meta_data_to_hub(repo_id, f"{data_dir}/meta_data", revision=revision)
     push_videos_to_hub(repo_id, f"{data_dir}/videos", revision=revision)
+
+
+def save_states_to_hdf5(file_path, initial_states):
+    with h5py.File(file_path, "w") as hf:
+        for i, init_state in enumerate(initial_states):
+            group = hf.create_group(f"data_{i}")
+            group.create_dataset("states", data=init_state["states"])
+            group.create_dataset(
+                "model", data=init_state["model"], dtype=h5py.string_dtype(encoding="utf-8")
+            )
+
+
+def load_states_from_hdf5(file_path):
+    if not Path(file_path).exists():
+        return None
+
+    with h5py.File(file_path, "r") as hf:
+        initial_states = []
+        for key in hf.keys():
+            initial_states.append(
+                {"states": hf[key]["states"][:], "model": hf[key]["model"][()].decode("utf-8")}
+            )
+        return initial_states

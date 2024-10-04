@@ -1,7 +1,7 @@
 defaults:
   - _self_
   - env: stack_d0
-  - policy: diffusion_mimicgen
+  - policy: act_mimicgen
 
 hydra:
   run:

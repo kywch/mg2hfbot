@@ -1,7 +1,7 @@
 # @package _global_
 
 seed: 1000
-dataset_repo_id: kywch/mimicgen_stack_d0
+dataset_repo_id: converted/stack_d0
 
 override_dataset_stats:
   observation.images.agentview:
@@ -21,8 +21,8 @@ training:
   log_freq: 200
   save_checkpoint: true
 
-  batch_size: 8
-  lr: 1e-5
+  batch_size: 128
+  lr: 1e-4
   lr_backbone: 1e-5
   weight_decay: 1e-4
   grad_clip_norm: 10
@@ -34,15 +34,18 @@ training:
 eval:
   n_episodes: 20
   batch_size: 20
+  use_training_episodes: true
 
 # See `configuration_act.py` for more details.
 policy:
   name: act
 
   # Input / output structure.
+  # Chunk size is the most important param to tune when applying ACT to a new environment.
+  # One chunk should correspond to ~1 secs wall-clock robot motion.
   n_obs_steps: 1
-  chunk_size: 100
-  n_action_steps: 100
+  chunk_size: 20
+  n_action_steps: 20
 
   input_shapes:
     # TODO(rcadene, alexander-soare): add variables for height and width from the dataset/env?
@@ -86,4 +89,4 @@ policy:
 
   # Training and loss computation.
   dropout: 0.1
-  kl_weight: 10.0
+  kl_weight: 100.0
