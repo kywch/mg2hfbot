@@ -406,8 +406,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-c",
         "--convert_to_absolute_actions",
-        type=bool,
-        default=False,
+        action="store_true",
         help="Whether to convert the actions to absolute actions. Defaults to False.",
     )
 
@@ -452,7 +451,16 @@ if __name__ == "__main__":
     # convert to lerobot
     output_dir = Path(f"{args.output_dir}/{download_task}")
     output_dir.mkdir(parents=True, exist_ok=True)
-    make_lerobot_dataset(download_task, dataset_path, output_dir, num_demos=args.num_demos)
+    convert_action = (
+        hasattr(args, "convert_to_absolute_actions") and args.convert_to_absolute_actions
+    )
+    make_lerobot_dataset(
+        download_task,
+        dataset_path,
+        output_dir,
+        num_demos=args.num_demos,
+        convert_to_absolute_actions=convert_action,
+    )
 
     if args.push_to_hub:
         push_to_hub(output_dir, repo_id=f"{args.dataset_repo_prefix}_{download_task}")
