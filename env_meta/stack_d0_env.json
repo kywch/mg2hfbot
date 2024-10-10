@@ -51,8 +51,8 @@
       "Panda"
     ],
     "camera_depths": false,
-    "camera_heights": 256,
-    "camera_widths": 256,
+    "camera_heights": 96,
+    "camera_widths": 96,
     "render_gpu_device_id": 0,
     "reward_shaping": false,
     "camera_names": [

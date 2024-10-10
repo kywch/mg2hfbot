@@ -49,28 +49,13 @@ from lerobot.scripts.train import (
     log_eval_info,
 )
 
-from utils import make_dataset_from_local, make_mimicgen_env, load_states_from_hdf5
+from utils import make_dataset_from_local, load_states_from_hdf5
+from env import make_mimicgen_env, IMAGE_OBS_SIZE, HIGHRES_IMAGE_OBS_SIZE
 
 
-def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = None):
-    if out_dir is None:
-        raise NotImplementedError()
-    if job_name is None:
-        raise NotImplementedError()
-
-    init_logging()
-    logging.info(pformat(OmegaConf.to_container(cfg)))
-
+def validate_config(cfg: DictConfig):
     if cfg.training.online_steps > 0:  # and isinstance(cfg.dataset_repo_id, ListConfig):
         raise NotImplementedError("Online training not implemented.")
-
-    if cfg.resume:
-        raise NotImplementedError("Resuming training not implemented.")
-    elif Logger.get_last_checkpoint_dir(out_dir).exists():
-        raise RuntimeError(
-            f"The configured output directory {Logger.get_last_checkpoint_dir(out_dir)} already exists. If "
-            "you meant to resume training, please use `resume=true` in your command or yaml configuration."
-        )
 
     if cfg.eval.batch_size > cfg.eval.n_episodes:
         raise ValueError(
@@ -80,6 +65,53 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
             "This might significantly slow down evaluation. To fix this, you should update your command "
             f"to increase the number of episodes to match the batch size (e.g. `eval.n_episodes={cfg.eval.batch_size}`), "
             f"or lower the batch size (e.g. `eval.batch_size={cfg.eval.n_episodes}`)."
+        )
+
+    # Check if the env config matches the policy config
+    image_obs_shape = cfg.policy.input_shapes["observation.images.agentview"]
+    if cfg.policy.name == "act":
+        assert not cfg.env.use_delta_action, "ACT should not use delta actions"
+        assert cfg.env.use_highres_image_obs, "ACT should use highres image obs"
+        assert (
+            image_obs_shape[1] == HIGHRES_IMAGE_OBS_SIZE[0]
+            and image_obs_shape[2] == HIGHRES_IMAGE_OBS_SIZE[1]
+        ), "Image obs shape does not match highres image obs size"
+
+    elif cfg.policy.name == "diffusion":
+        assert not cfg.env.use_delta_action, "Diffusion should not use delta actions"
+        assert not cfg.env.use_highres_image_obs, "Diffusion should not use highres image obs"
+        assert (
+            image_obs_shape[1] == IMAGE_OBS_SIZE[0] and image_obs_shape[2] == IMAGE_OBS_SIZE[1]
+        ), "Image obs shape does not match image obs size"
+
+    elif cfg.policy.name.startswith("bc"):
+        assert cfg.env.use_delta_action, "BC-RNN should use delta actions"
+        assert not cfg.env.use_highres_image_obs, "BC-RNN should not use highres image obs"
+        assert (
+            image_obs_shape[1] == IMAGE_OBS_SIZE[0] and image_obs_shape[2] == IMAGE_OBS_SIZE[1]
+        ), "Image obs shape does not match highres image obs size"
+
+    else:
+        raise NotImplementedError(f"Unsupported policy: {cfg.policy.name}")
+
+
+def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = None):
+    if out_dir is None:
+        raise NotImplementedError()
+    if job_name is None:
+        raise NotImplementedError()
+
+    validate_config(cfg)
+
+    init_logging()
+    logging.info(pformat(OmegaConf.to_container(cfg)))
+
+    if cfg.resume:
+        raise NotImplementedError("Resuming training not implemented.")
+    elif Logger.get_last_checkpoint_dir(out_dir).exists():
+        raise RuntimeError(
+            f"The configured output directory {Logger.get_last_checkpoint_dir(out_dir)} already exists. If "
+            "you meant to resume training, please use `resume=true` in your command or yaml configuration."
         )
 
     # log metrics to terminal and wandb
@@ -227,6 +259,14 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
         start_time = time.perf_counter()
         batch = next(dl_iter)
         dataloading_s = time.perf_counter() - start_time
+
+        # Modify the action and image obs to match the config
+        if cfg.env.use_delta_action:
+            batch["action"] = batch["action_delta"]
+
+        if cfg.env.use_highres_image_obs:
+            for k in cfg.env.image_keys:
+                batch[f"observation.images.{k}"] = batch[f"observation.images.{k}_highres"]
 
         for key in batch:
             batch[key] = batch[key].to(device, non_blocking=True)

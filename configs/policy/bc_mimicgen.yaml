@@ -1,0 +1,51 @@
+# @package _global_
+
+seed: 1000
+dataset_repo_id: converted/stack_d0
+
+training:
+  offline_steps: 60000
+  online_steps: 0
+  eval_freq: 10000
+  save_freq: 10000
+  log_freq: 200
+  save_checkpoint: true
+
+  # Optimizer
+  lr: 0.0001
+  weight_decay: 0.0
+
+  # LR scheduler
+  decay_factor: 0.1
+  epoch_schedule: []
+  scheduler_type: multistep
+
+  # Training
+  num_workers: 4
+  batch_size: 16
+  grad_clip_norm: 200
+
+  delta_timestamps:
+    observation.images.agentview: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
+    observation.images.robot0_eye_in_hand: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
+    observation.state: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
+    action_delta: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
+
+eval:
+  n_episodes: 20
+  batch_size: 20
+  use_training_episodes: true
+
+# See `configuration_act.py` for more details.
+policy:
+  name: bcrnn
+  n_obs_steps: 10
+
+  input_shapes:
+    observation.images.agentview: [3, 96, 96]
+    observation.images.robot0_eye_in_hand: [3, 96, 96]
+    observation.state: ["${env.state_dim}"]
+  output_shapes:
+    action: ["${env.action_dim}"]
+
+

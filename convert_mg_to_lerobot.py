@@ -2,6 +2,7 @@
 import os
 import json
 import yaml
+import shutil
 import argparse
 from argparse import Namespace
 
@@ -28,16 +29,14 @@ from lerobot.common.datasets.utils import hf_transform_to_torch
 from lerobot.common.datasets.video_utils import VideoFrame, encode_video_frames
 from lerobot.scripts.push_dataset_to_hub import save_meta_data
 
-from utils import ENV_META_DIR, save_images_concurrently, push_to_hub, save_states_to_hdf5
-from env import MimicgenWrapper
+from utils import save_images_concurrently, push_to_hub, save_states_to_hdf5
+from env import MimicgenWrapper, ENV_META_DIR, IMAGE_OBS_SIZE, HIGHRES_IMAGE_OBS_SIZE
 
 
 NUM_WORKERS = 8
 ENV_CONFIG_DIR = Path("./configs/env")
 
-IMAGE_OBS_SIZE = (256, 256)
-SMALL_IMAGE_OBS_POSTFIX = "_lowres"
-SMALL_IMAGE_OBS_SIZE = (96, 96)
+HIGHRES_IMAGE_OBS_POSTFIX = "_highres"
 
 
 def download_mimicgen_dataset(base_dir, task, dataset_type="source", overwrite=False):
@@ -73,26 +72,24 @@ def rollout_episode(
     repro_env,
     initial_state_dict,
     action_mat,
-    convert_to_absolute_actions=False,
     follow_through=30,
     use_tqdm=False,
 ):
     # reset to initial state
     repro_obs, _ = repro_env.reset_to(initial_state_dict)
-    if convert_to_absolute_actions:
-        trans_obs = trans_env.reset_to(initial_state_dict)
-        assert np.array_equal(
-            repro_env.eef_pos, trans_obs["robot0_eef_pos"]
-        ), "Repro env and trans env have different eef pos"
-        assert np.array_equal(
-            repro_env.eef_quat, trans_obs["robot0_eef_quat"]
-        ), "Repro env and trans env have different eef quat"
+    trans_obs = trans_env.reset_to(initial_state_dict)
+    assert np.array_equal(
+        repro_env.eef_pos, trans_obs["robot0_eef_pos"]
+    ), "Repro env and trans env have different eef pos"
+    assert np.array_equal(
+        repro_env.eef_quat, trans_obs["robot0_eef_quat"]
+    ), "Repro env and trans env have different eef quat"
 
     # init buffers
     # NOTE: mimicgen wrapper only returns pixels and agent_pos
     image_obs = {k: [] for k in repro_env.image_keys}
     state_obs = []
-    new_actions = []
+    actions_abs = []
     rewards = []
     successes = []
 
@@ -102,23 +99,21 @@ def rollout_episode(
     final_action = np.zeros((follow_through, repro_env.cfg.action_dim))
 
     # append the final action to the action_mat
-    mod_action = np.vstack([action_mat, final_action])
+    actions_delta = np.vstack([action_mat, final_action])
 
-    def step(action):
-        new_action = action
-        if convert_to_absolute_actions:
-            trans_obs, _, _, _ = trans_env.step(action)
-            goal_pos = trans_env.env.robots[0].controller.goal_pos
-            goal_ori = T.quat2axisangle(T.mat2quat(trans_env.env.robots[0].controller.goal_ori))
-            new_action = np.concatenate((goal_pos, goal_ori, (action[-1],)))
+    def step(action_delta):
+        trans_obs, _, _, _ = trans_env.step(action_delta)
+        goal_pos = trans_env.env.robots[0].controller.goal_pos
+        goal_ori = T.quat2axisangle(T.mat2quat(trans_env.env.robots[0].controller.goal_ori))
+        action_abs = np.concatenate((goal_pos, goal_ori, (action[-1],)))
 
-        repro_obs, reward, done, trunc, info = repro_env.step(new_action)
+        repro_obs, reward, done, trunc, info = repro_env.step(action_abs)
 
         # Check if the new_action produces the same eef pos and quat in the repro env
         # assert np.allclose(repro_env.eef_pos, trans_obs["robot0_eef_pos"], atol=1e-1), "Repro env and trans env have different eef pos"
         # assert np.allclose(repro_env.eef_quat, trans_obs["robot0_eef_quat"], atol=1e-1), "Repro env and trans env have different eef quat"
 
-        new_actions.append(new_action)
+        actions_abs.append(action_abs)
 
         # NOTE: assume that obs to keep are only the agent_pos or the images
         for key in image_obs.keys():
@@ -133,18 +128,20 @@ def rollout_episode(
         successes.append(repro_env.success_history[-1])
 
     if use_tqdm:
-        for action in tqdm(mod_action):
+        for action in tqdm(actions_delta):
             step(action)
     else:
-        for action in mod_action:
+        for action in actions_delta:
             step(action)
 
     ep_dict = {}
-    ep_len = len(new_actions)
+    ep_len = len(actions_abs)
     timestamps = [i / repro_env.env_meta["env_kwargs"]["control_freq"] for i in range(ep_len)]
 
     ep_dict["observation.state"] = torch.tensor(np.vstack(state_obs))
-    ep_dict["action"] = torch.tensor(np.vstack(new_actions))
+    # NOTE: the lerobot action space is absolute pose, since ACT and diffusion policies prefer it
+    ep_dict["action"] = torch.tensor(np.vstack(actions_abs))
+    ep_dict["action_delta"] = torch.tensor(actions_delta)
     ep_dict["next.done"] = torch.zeros(ep_len, dtype=torch.bool)
     ep_dict["next.done"][-1] = True
     ep_dict["next.reward"] = torch.tensor(np.array(rewards))
@@ -163,9 +160,7 @@ def make_lerobot_dataset(
     dataset_path,
     output_dir,
     num_demos=None,
-    img_height=256,
-    img_width=256,
-    convert_to_absolute_actions=False,
+    follow_through=30,
 ):
     mg_file = h5py.File(dataset_path, "r")
 
@@ -182,23 +177,21 @@ def make_lerobot_dataset(
         fps = cfg["fps"]
 
     # Save env_meta to lerobot meta_data, so that train/eval
-    env_meta = json.loads(mg_file["data"].attrs["env_args"])
-    env_meta["env_kwargs"]["camera_heights"] = img_height
-    env_meta["env_kwargs"]["camera_widths"] = img_width
+    repro_env_meta = json.loads(mg_file["data"].attrs["env_args"])
 
-    # Set controller to take absolute actions
-    if convert_to_absolute_actions:
-        env_meta["env_kwargs"]["controller_configs"]["control_delta"] = False
-
+    # These settings are default for train/eval
+    repro_env_meta["env_kwargs"]["camera_heights"] = IMAGE_OBS_SIZE[0]
+    repro_env_meta["env_kwargs"]["camera_widths"] = IMAGE_OBS_SIZE[1]
+    repro_env_meta["env_kwargs"]["controller_configs"]["control_delta"] = False
     with open(ENV_META_DIR / f"{task}_env.json", "w") as f:
-        json.dump(env_meta, f, indent=2)
+        json.dump(repro_env_meta, f, indent=2)
 
     # Sanity checks between env_config and env_meta
     assert (
-        fps == env_meta["env_kwargs"]["control_freq"]
+        fps == repro_env_meta["env_kwargs"]["control_freq"]
     ), "fps in env_config must match control_freq in env_meta"
     assert (
-        env_config.image_keys == env_meta["env_kwargs"]["camera_names"]
+        env_config.image_keys == repro_env_meta["env_kwargs"]["camera_names"]
     ), "image_keys in env_config must match camera_names in env_meta"
 
     # Mimicgen requires this to be set globally
@@ -208,23 +201,26 @@ def make_lerobot_dataset(
 
     # LeRobot expects actions to be in absolute coordinates
     # This is the env that we'll use to translate delta actions to absolute actions
-    trans_env = None
-    if convert_to_absolute_actions:
-        trans_env_meta = json.loads(mg_file["data"].attrs["env_args"])
-        trans_env = EnvUtils.create_env_from_metadata(
-            env_meta=trans_env_meta,
-            render=False,  # no on-screen rendering
-            render_offscreen=False,  # No need to render anything
-            use_image_obs=False,
-        )
+    trans_env_meta = json.loads(mg_file["data"].attrs["env_args"])
+    trans_env = EnvUtils.create_env_from_metadata(
+        env_meta=trans_env_meta,
+        render=False,  # no on-screen rendering
+        render_offscreen=False,  # No need to render anything
+        use_image_obs=False,
+    )
 
+    # NOTE: change the image size to the highres size
+    repro_env_meta["env_kwargs"]["camera_heights"] = HIGHRES_IMAGE_OBS_SIZE[0]
+    repro_env_meta["env_kwargs"]["camera_widths"] = HIGHRES_IMAGE_OBS_SIZE[1]
     repro_env = EnvUtils.create_env_from_metadata(
-        env_meta=env_meta,
+        env_meta=repro_env_meta,
         render=False,  # no on-screen rendering
         render_offscreen=True,  # off-screen rendering to support rendering video frames
         use_image_obs=True,
     )
-    repro_env = MimicgenWrapper(repro_env, env_config, env_meta)
+    repro_env = MimicgenWrapper(
+        repro_env, env_config, repro_env_meta, success_criteria=follow_through
+    )
 
     ### produce the lerobot dataset from the env and saved actions
     ep_dicts = []
@@ -249,7 +245,7 @@ def make_lerobot_dataset(
         action_mat = mg_file[f"data/{demo_key}/actions"][:]
 
         ep_dict, image_obs, is_success = rollout_episode(
-            trans_env, repro_env, initial_state_dict, action_mat, convert_to_absolute_actions
+            trans_env, repro_env, initial_state_dict, action_mat, follow_through=follow_through
         )
         ep_len = ep_dict["action"].shape[0]
 
@@ -264,23 +260,25 @@ def make_lerobot_dataset(
         for img_key in repro_env.image_keys:
             save_images_concurrently(
                 image_obs[img_key],
-                Path(f"{output_dir}/images/{img_key}_episode_{ep_idx:06d}"),
-                lowres_out_dir=Path(f"{output_dir}/images/{img_key}_episode_{ep_idx:06d}_lowres"),
-                lowres_size=SMALL_IMAGE_OBS_SIZE,
+                Path(f"{output_dir}/images/{img_key}_episode_{ep_idx:06d}_highres"),
+                lowres_out_dir=Path(f"{output_dir}/images/{img_key}_episode_{ep_idx:06d}"),
+                lowres_size=IMAGE_OBS_SIZE,
                 max_workers=NUM_WORKERS,
             )
+            ep_dict[f"observation.images.{img_key}"] = []
             fname = f"{img_key}_episode_{ep_idx:06d}.mp4"
-            fname_lowres = f"{img_key}_episode_{ep_idx:06d}_lowres.mp4"
+
+            # NOTE: comment out the lowres video for now
+            fname_highres = f"{img_key}_episode_{ep_idx:06d}_highres.mp4"
+            ep_dict[f"observation.images.{img_key}_highres"] = []
 
             # store the reference to the video frame
-            ep_dict[f"observation.images.{img_key}"] = []
-            ep_dict[f"observation.images.{img_key}_lowres"] = []
             for tstp in ep_dict["timestamp"].tolist():
                 ep_dict[f"observation.images.{img_key}"].append(
                     {"path": f"videos/{fname}", "timestamp": tstp}
                 )
-                ep_dict[f"observation.images.{img_key}_lowres"].append(
-                    {"path": f"videos/{fname_lowres}", "timestamp": tstp}
+                ep_dict[f"observation.images.{img_key}_highres"].append(
+                    {"path": f"videos/{fname_highres}", "timestamp": tstp}
                 )
 
         ep_dicts.append(ep_dict)
@@ -289,8 +287,7 @@ def make_lerobot_dataset(
         id_from += ep_len
 
     # finished collecting data
-    if convert_to_absolute_actions:
-        trans_env.env.close()
+    trans_env.env.close()
     repro_env.close()
 
     # convert images into videos
@@ -317,6 +314,9 @@ def make_lerobot_dataset(
     )
     features["action"] = Sequence(
         length=data_dict["action"].shape[1], feature=Value(dtype="float32", id=None)
+    )
+    features["action_delta"] = Sequence(
+        length=data_dict["action_delta"].shape[1], feature=Value(dtype="float32", id=None)
     )
     features["episode_index"] = Value(dtype="int64", id=None)
     features["frame_index"] = Value(dtype="int64", id=None)
@@ -353,8 +353,7 @@ def make_lerobot_dataset(
     with open(Path(f"{output_dir}/meta_data/config.yaml"), "w") as f:
         yaml.dump(cfg, f)
 
-    with open(Path(f"{output_dir}/meta_data/env_meta.json"), "w") as f:
-        json.dump(env_meta, f, indent=2)
+    shutil.copy2(ENV_META_DIR / f"{task}_env.json", Path(f"{output_dir}/meta_data/env_meta.json"))
 
     with open(Path(f"{output_dir}/meta_data/ep_success.json"), "w") as f:
         json.dump(ep_success, f, indent=2)
@@ -399,15 +398,8 @@ if __name__ == "__main__":
         "-t",
         "--task",
         type=str,
-        default="coffee",
+        default="stack",
         help="Task to download datasets for. Defaults to stack task.",
-    )
-
-    parser.add_argument(
-        "-c",
-        "--convert_to_absolute_actions",
-        action="store_true",
-        help="Whether to convert the actions to absolute actions. Defaults to False.",
     )
 
     # limit the number of demos to convert
@@ -451,15 +443,11 @@ if __name__ == "__main__":
     # convert to lerobot
     output_dir = Path(f"{args.output_dir}/{download_task}")
     output_dir.mkdir(parents=True, exist_ok=True)
-    convert_action = (
-        hasattr(args, "convert_to_absolute_actions") and args.convert_to_absolute_actions
-    )
     make_lerobot_dataset(
         download_task,
         dataset_path,
         output_dir,
         num_demos=args.num_demos,
-        convert_to_absolute_actions=convert_action,
     )
 
     if args.push_to_hub:

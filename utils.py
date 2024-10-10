@@ -1,20 +1,15 @@
 import json
 from pathlib import Path
-from omegaconf import OmegaConf, DictConfig
+from omegaconf import OmegaConf
 
 from concurrent.futures import ThreadPoolExecutor
 import PIL
 import h5py
 
-import gymnasium as gym
 import numpy as np
 import torch
 from datasets import Dataset
 from safetensors.torch import load_file, safe_open
-
-import mimicgen  # noqa
-import robomimic.utils.env_utils as EnvUtils
-import robomimic.utils.obs_utils as ObsUtils
 
 from lerobot.common.datasets.factory import resolve_delta_timestamps
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
@@ -24,10 +19,6 @@ from lerobot.scripts.push_dataset_to_hub import (
     push_meta_data_to_hub,
     push_videos_to_hub,
 )
-
-from env import MimicgenWrapper
-
-ENV_META_DIR = Path("./env_meta")
 
 
 def load_stats_from_safetensors(filename):
@@ -94,70 +85,6 @@ def make_dataset_from_local(cfg, root_dir=".", split: str = "train") -> LeRobotD
                 dataset.stats[key][stats_type] = torch.tensor(stats, dtype=torch.float32)
 
     return dataset
-
-
-def make_mimicgen_env(
-    cfg: DictConfig, eval_init_states: list[dict] | None = None, n_envs: int | None = None
-) -> gym.vector.VectorEnv | None:
-    """Makes a gym vector environment according to the evaluation config.
-
-    n_envs can be used to override eval.batch_size in the configuration. Must be at least 1.
-    """
-
-    # NOTE: ignoring n_envs for now
-    if n_envs is not None and n_envs < 1:
-        raise ValueError("`n_envs must be at least 1")
-
-    if cfg.env.name == "real_world":
-        return
-
-    # Mimicgen requires this to be set globally
-    ObsUtils.initialize_obs_modality_mapping_from_dict(
-        modality_mapping={"rgb": [f"{k}_image" for k in cfg.env.image_keys]}
-    )
-
-    # load the env meta file
-    env_meta_file = ENV_META_DIR / cfg.env.meta
-    with open(env_meta_file, "r") as f:
-        env_meta = json.load(f)
-
-    # use lowres image for eval?
-    lowres_image_obs = cfg.eval.get("lowres_image_obs", False)
-
-    def env_creator():
-        env = EnvUtils.create_env_from_metadata(
-            env_meta=env_meta,
-            render=False,  # no on-screen rendering
-            render_offscreen=True,  # off-screen rendering to support rendering video frames
-            use_image_obs=True,
-        )
-
-        # return env
-        return MimicgenWrapper(
-            env,
-            cfg.env,
-            env_meta,
-            lowres_image_obs=lowres_image_obs,
-            eval_init_states=eval_init_states,
-        )
-
-    # NOTE: mimicgen disables max horizon (see ignore_done). Change in the mimicgen repo if needed.
-    # if cfg.env.get("episode_length"):
-    #     gym_kwgs["max_episode_steps"] = cfg.env.episode_length
-
-    # NOTE: CANNOT use vecenv for some reason, ignore cfg.eval.batch_size
-    # I guess this is OK since I am not using the vecenv for training
-    return gym.vector.SyncVectorEnv([env_creator])
-
-    # # batched version of the env that returns an observation of shape (b, c)
-    # env_cls = gym.vector.AsyncVectorEnv if cfg.eval.use_async_envs else gym.vector.SyncVectorEnv
-    # vec_env = env_cls(
-    #     [
-    #         lambda: env_creator()
-    #         for _ in range(n_envs if n_envs is not None else cfg.eval.batch_size)
-    #     ]
-    # )
-    # return vec_env
 
 
 def save_images_concurrently(
