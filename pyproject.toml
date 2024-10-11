@@ -16,6 +16,7 @@ classifiers = [
 ]
 
 dependencies = [
+    "gymnasium==0.29.1",
     "mimicgen@git+https://github.com/kywch/mimicgen.git",
     "mujoco==2.3.2",  # see https://mimicgen.github.io/docs/introduction/installation.html#mujoco
     "robosuite==1.4.1",
