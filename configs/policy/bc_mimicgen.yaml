@@ -1,13 +1,13 @@
 # @package _global_
 
 seed: 1000
-dataset_repo_id: converted/stack_d0
+dataset_repo_id: kywch/mimicgen_stack_d0 
 
 training:
-  offline_steps: 60000
+  offline_steps: 120000
   online_steps: 0
   eval_freq: 10000
-  save_freq: 10000
+  save_freq: 20000
   log_freq: 200
   save_checkpoint: true
 
@@ -34,7 +34,7 @@ training:
 eval:
   n_episodes: 20
   batch_size: 20
-  use_training_episodes: true
+  use_training_episodes: false
 
 # See `configuration_act.py` for more details.
 policy:

@@ -33,9 +33,13 @@ def make_mimicgen_env(
         return
 
     # Mimicgen requires this to be set globally
-    ObsUtils.initialize_obs_modality_mapping_from_dict(
-        modality_mapping={"rgb": [f"{k}_image" for k in cfg.env.image_keys]}
-    )
+    image_keys = [f"{k}_image" for k in cfg.env.image_keys]
+    if ObsUtils.OBS_KEYS_TO_MODALITIES is None:
+        ObsUtils.initialize_obs_modality_mapping_from_dict(modality_mapping={"rgb": image_keys})
+    else:
+        # NOTE: there is also OBS_MODALITIES_TO_KEYS but it's not used, so ignoring it for now.
+        for k in image_keys:
+            ObsUtils.OBS_KEYS_TO_MODALITIES[k] = "rgb"
 
     # load the env meta file
     env_meta_file = ENV_META_DIR / cfg.env.meta

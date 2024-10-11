@@ -29,6 +29,7 @@ import torch
 from torch import nn
 from torch.cuda.amp import GradScaler
 
+from lerobot.common.datasets.factory import make_dataset
 from lerobot.common.datasets.lerobot_dataset import MultiLeRobotDataset
 from lerobot.common.datasets.sampler import EpisodeAwareSampler
 from lerobot.common.datasets.utils import cycle
@@ -126,7 +127,10 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
     torch.backends.cuda.matmul.allow_tf32 = True
 
     logging.info("make_dataset")
-    offline_dataset = make_dataset_from_local(cfg)
+    try:
+        offline_dataset = make_dataset(cfg)
+    except:  # noqa
+        offline_dataset = make_dataset_from_local(cfg)
     if isinstance(offline_dataset, MultiLeRobotDataset):
         logging.info(
             "Multiple datasets were provided. Applied the following index mapping to the provided datasets: "

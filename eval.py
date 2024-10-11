@@ -41,7 +41,8 @@ from lerobot.scripts.eval import (
     eval_policy,
 )
 
-from utils import make_dataset_from_local, make_mimicgen_env
+from utils import make_dataset_from_local
+from env import make_mimicgen_env
 
 
 def main(
@@ -72,9 +73,6 @@ def main(
 
     log_output_dir(out_dir)
 
-    logging.info("Making environment.")
-    vec_env = make_mimicgen_env(hydra_cfg)
-
     logging.info("Making policy.")
     if hydra_cfg_path is None:
         policy = make_policy(
@@ -85,6 +83,9 @@ def main(
         policy = make_policy(
             hydra_cfg=hydra_cfg, dataset_stats=make_dataset_from_local(hydra_cfg).stats
         )
+
+    logging.info("Making environment.")
+    vec_env = make_mimicgen_env(hydra_cfg)
 
     assert isinstance(policy, nn.Module)
     policy.eval()
