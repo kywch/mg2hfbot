@@ -5,10 +5,18 @@ fps: 20
 env:
   name: mimicgen
   task: Stack_D1
-  state_dim: 54
+  state_dim: 9
   action_dim: 7
-  episode_length: 200
+  episode_length: 250
   meta: stack_d1_env.json
-  image_keys: ["agentview", "robot0_eye_in_hand"]
-  state_keys: ["object", "robot0_joint_pos", "robot0_joint_vel", "robot0_eef_pos", "robot0_eef_quat",
-              "robot0_eef_vel_lin", "robot0_eef_vel_ang", "robot0_gripper_qpos", "robot0_gripper_qvel"]
+  image_keys:
+  - agentview
+  - robot0_eye_in_hand
+  state_keys:
+  - robot0_eef_pos
+  - robot0_eef_quat
+  - robot0_gripper_qpos
+
+  # These should match the policy requirements
+  use_delta_action: true
+  use_highres_image_obs: false
