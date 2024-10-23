@@ -344,6 +344,13 @@ def make_lerobot_dataset(
                 initial_states.append(repro_data["initial_states"][ep_idx])
                 ep_success[new_idx] = repro_data["ep_success"][ep_idx]
                 new_idx += 1
+            else:
+                # Delete failed demo videos, when success_only is True
+                for img_key in repro_env.image_keys:
+                    os.remove(output_dir / ep_dict[f"observation.images.{img_key}"][0]["path"])
+                    os.remove(
+                        output_dir / ep_dict[f"observation.images.{img_key}_highres"][0]["path"]
+                    )
     else:
         ep_dicts, initial_states, ep_success = (
             repro_data["ep_dicts"],
@@ -500,6 +507,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    args.dataset_type = "core"
+    args.task = "coffee_preparation_d0"
+    args.success_only = True
+
     # load args
     download_dir = args.download_dir
     download_dataset_type = args.dataset_type
@@ -522,9 +533,9 @@ if __name__ == "__main__":
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # if there is existing repro data, use it
-    previous_artifact = (
-        None if args.ignore_previous_artifact else output_dir / PREVIOUS_ARTIFACT_FILE
-    )
+    previous_artifact = None
+    if not args.ignore_previous_artifact and os.path.exists(output_dir / PREVIOUS_ARTIFACT_FILE):
+        previous_artifact = output_dir / PREVIOUS_ARTIFACT_FILE
 
     make_lerobot_dataset(
         download_task,
