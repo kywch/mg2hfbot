@@ -3,6 +3,7 @@ import os
 import json
 import yaml
 import shutil
+import pickle
 import argparse
 from argparse import Namespace
 
@@ -37,6 +38,7 @@ NUM_WORKERS = 8
 ENV_CONFIG_DIR = Path("./configs/env")
 
 HIGHRES_IMAGE_OBS_POSTFIX = "_highres"
+PREVIOUS_ARTIFACT_FILE = "repro_data.pt"
 
 
 def download_mimicgen_dataset(base_dir, task, dataset_type="source", overwrite=False):
@@ -154,6 +156,88 @@ def rollout_episode(
     return ep_dict, image_obs, repro_env.is_success()
 
 
+def reproduce_trajectory(mg_file, demos, repro_env, trans_env, follow_through=30):
+    ### produce the lerobot dataset from the env and saved actions
+    ep_dicts = []
+    episode_data_index = {"from": [], "to": []}
+    id_from = 0
+    ep_success = {}
+    initial_states = []
+
+    print("Replaying actions...")
+    for ep_idx, demo_key in tqdm(enumerate(demos), total=len(demos)):
+        # robosuite datasets store the ground-truth simulator states under the "states" key.
+        # We will use the first one, alone with the model xml, to reset the environment to
+        # the initial configuration before playing back actions.
+        init_state = mg_file[f"data/{demo_key}/states"][0]
+        model_xml = mg_file[f"data/{demo_key}"].attrs["model_file"]
+        initial_state_dict = dict(states=init_state, model=model_xml)
+        initial_states.append(initial_state_dict)
+
+        action_mat = mg_file[f"data/{demo_key}/actions"][:]
+
+        ep_dict, image_obs, is_success = rollout_episode(
+            trans_env, repro_env, initial_state_dict, action_mat, follow_through=follow_through
+        )
+        ep_len = ep_dict["action"].shape[0]
+
+        # ep_idx = int(demo_key.split("_")[-1])
+        ep_dict["episode_index"] = torch.tensor([ep_idx] * ep_len, dtype=torch.int64)
+        ep_success[ep_idx] = {
+            "demo_key": demo_key,
+            "is_success": bool(is_success),
+        }
+
+        # Convert the images into full-size and low-res videos
+        for img_key in repro_env.image_keys:
+            save_images_concurrently(
+                image_obs[img_key],
+                Path(f"{output_dir}/images/{img_key}_episode_{ep_idx:06d}_highres"),
+                lowres_out_dir=Path(f"{output_dir}/images/{img_key}_episode_{ep_idx:06d}"),
+                lowres_size=IMAGE_OBS_SIZE,
+                max_workers=NUM_WORKERS,
+            )
+            ep_dict[f"observation.images.{img_key}"] = []
+            fname = f"{img_key}_episode_{ep_idx:06d}.mp4"
+
+            # NOTE: comment out the lowres video for now
+            fname_highres = f"{img_key}_episode_{ep_idx:06d}_highres.mp4"
+            ep_dict[f"observation.images.{img_key}_highres"] = []
+
+            # store the reference to the video frame
+            for tstp in ep_dict["timestamp"].tolist():
+                ep_dict[f"observation.images.{img_key}"].append(
+                    {"path": f"videos/{fname}", "timestamp": tstp}
+                )
+                ep_dict[f"observation.images.{img_key}_highres"].append(
+                    {"path": f"videos/{fname_highres}", "timestamp": tstp}
+                )
+
+        ep_dicts.append(ep_dict)
+        episode_data_index["from"].append(id_from)
+        episode_data_index["to"].append(id_from + ep_len)  # CHECK ME: keep_last?
+        id_from += ep_len
+
+    return ep_dicts, initial_states, ep_success
+
+
+def make_videos(output_dir, fps):
+    # convert images into videos
+    image_dirs = list(output_dir.glob("images/*"))
+    for image_dir in image_dirs:
+        video_file = Path(f"{output_dir}/videos/{image_dir.name}.mp4")
+        if os.path.exists(video_file):
+            os.remove(video_file)
+
+        # This fn needs ffmpeg to be installed. $ sudo apt install ffmpeg
+        encode_video_frames(
+            vcodec="libx265",
+            imgs_dir=Path(image_dir),
+            video_path=Path(video_file),
+            fps=fps,
+        )
+
+
 # NOTE: Using only single env due to technical difficuties
 def make_lerobot_dataset(
     task,
@@ -161,6 +245,8 @@ def make_lerobot_dataset(
     output_dir,
     num_demos=None,
     follow_through=30,
+    previous_artifact=None,
+    success_only=False,
 ):
     mg_file = h5py.File(dataset_path, "r")
 
@@ -222,88 +308,59 @@ def make_lerobot_dataset(
         repro_env, env_config, repro_env_meta, success_criteria=follow_through
     )
 
-    ### produce the lerobot dataset from the env and saved actions
-    ep_dicts = []
-    episode_data_index = {"from": [], "to": []}
-    id_from = 0
-    ep_success = {}
-    initial_states = []
-
     if num_demos is not None:
         demos = demos[:num_demos]
 
-    print("Replaying actions...")
-    for ep_idx, demo_key in tqdm(enumerate(demos), total=len(demos)):
-        # robosuite datasets store the ground-truth simulator states under the "states" key.
-        # We will use the first one, alone with the model xml, to reset the environment to
-        # the initial configuration before playing back actions.
-        init_state = mg_file[f"data/{demo_key}/states"][0]
-        model_xml = mg_file[f"data/{demo_key}"].attrs["model_file"]
-        initial_state_dict = dict(states=init_state, model=model_xml)
-        initial_states.append(initial_state_dict)
-
-        action_mat = mg_file[f"data/{demo_key}/actions"][:]
-
-        ep_dict, image_obs, is_success = rollout_episode(
-            trans_env, repro_env, initial_state_dict, action_mat, follow_through=follow_through
+    if previous_artifact is not None:
+        print("\nLoading previous artifact to skip reproducing the trajectory...\n")
+        with open(previous_artifact, "rb") as f:
+            repro_data = pickle.load(f)
+        ep_dicts, initial_states, ep_success = (
+            repro_data["ep_dicts"],
+            repro_data["initial_states"],
+            repro_data["ep_success"],
         )
-        ep_len = ep_dict["action"].shape[0]
-
-        # ep_idx = int(demo_key.split("_")[-1])
-        ep_dict["episode_index"] = torch.tensor([ep_idx] * ep_len, dtype=torch.int64)
-        ep_success[ep_idx] = {
-            "demo_key": demo_key,
-            "is_success": bool(is_success),
-        }
-
-        # Convert the images into full-size and low-res videos
-        for img_key in repro_env.image_keys:
-            save_images_concurrently(
-                image_obs[img_key],
-                Path(f"{output_dir}/images/{img_key}_episode_{ep_idx:06d}_highres"),
-                lowres_out_dir=Path(f"{output_dir}/images/{img_key}_episode_{ep_idx:06d}"),
-                lowres_size=IMAGE_OBS_SIZE,
-                max_workers=NUM_WORKERS,
+    else:
+        repro_data = {}
+        repro_data["ep_dicts"], repro_data["initial_states"], repro_data["ep_success"] = (
+            reproduce_trajectory(
+                mg_file, demos, repro_env, trans_env, follow_through=follow_through
             )
-            ep_dict[f"observation.images.{img_key}"] = []
-            fname = f"{img_key}_episode_{ep_idx:06d}.mp4"
+        )
+        make_videos(output_dir, fps=fps)
 
-            # NOTE: comment out the lowres video for now
-            fname_highres = f"{img_key}_episode_{ep_idx:06d}_highres.mp4"
-            ep_dict[f"observation.images.{img_key}_highres"] = []
+        # Save the artifacts to reuse later
+        with open(output_dir / PREVIOUS_ARTIFACT_FILE, "wb") as f:
+            pickle.dump(repro_data, f)
 
-            # store the reference to the video frame
-            for tstp in ep_dict["timestamp"].tolist():
-                ep_dict[f"observation.images.{img_key}"].append(
-                    {"path": f"videos/{fname}", "timestamp": tstp}
-                )
-                ep_dict[f"observation.images.{img_key}_highres"].append(
-                    {"path": f"videos/{fname_highres}", "timestamp": tstp}
-                )
-
-        ep_dicts.append(ep_dict)
-        episode_data_index["from"].append(id_from)
-        episode_data_index["to"].append(id_from + ep_len)  # CHECK ME: keep_last?
-        id_from += ep_len
+    # Filter the data, if needed, and create the episode_data_index
+    if success_only:
+        ep_dicts, initial_states, ep_success, new_idx = [], [], {}, 0
+        for ep_idx, ep_dict in enumerate(repro_data["ep_dicts"]):
+            if repro_data["ep_success"][ep_idx]["is_success"]:
+                ep_len = ep_dict["action"].shape[0]
+                ep_dict["episode_index"] = torch.tensor([new_idx] * ep_len, dtype=torch.int64)
+                ep_dicts.append(ep_dict)
+                initial_states.append(repro_data["initial_states"][ep_idx])
+                ep_success[new_idx] = repro_data["ep_success"][ep_idx]
+                new_idx += 1
+    else:
+        ep_dicts, initial_states, ep_success = (
+            repro_data["ep_dicts"],
+            repro_data["initial_states"],
+            repro_data["ep_success"],
+        )
 
     # finished collecting data
     trans_env.env.close()
     repro_env.close()
 
-    # convert images into videos
-    image_dirs = list(output_dir.glob("images/*"))
-    for image_dir in image_dirs:
-        video_file = Path(f"{output_dir}/videos/{image_dir.name}.mp4")
-        if os.path.exists(video_file):
-            os.remove(video_file)
-
-        # This fn needs ffmpeg to be installed. $ sudo apt install ffmpeg
-        encode_video_frames(
-            vcodec="libx265",
-            imgs_dir=Path(image_dir),
-            video_path=Path(video_file),
-            fps=fps,
-        )
+    # Create the episode_data_index
+    episode_lengths = [ep_dict["action"].shape[0] for ep_dict in ep_dicts]
+    episode_data_index = {
+        "from": [sum(episode_lengths[:i]) for i in range(len(episode_lengths))],
+        "to": [sum(episode_lengths[: i + 1]) for i in range(len(episode_lengths))],
+    }
 
     # Prepare the dataset
     data_dict = concatenate_episodes(ep_dicts)
@@ -362,8 +419,10 @@ def make_lerobot_dataset(
 
     num_success = sum(1 for ep_success in ep_success.values() if ep_success["is_success"])
     print(
-        f"Finished converting the mimicgen {task} dataset to lerobot dataset. Reproduction success rate: {num_success}/{len(ep_success)}"
+        f"Finished converting the mimicgen {task} dataset to lerobot dataset. Reproduction success rate: {num_success}/{len(demos)}"
     )
+    if success_only:
+        print("Filtered to only include successful demos.")
 
 
 if __name__ == "__main__":
@@ -400,6 +459,20 @@ if __name__ == "__main__":
         type=str,
         default="stack",
         help="Task to download datasets for. Defaults to stack task.",
+    )
+
+    # ignore the previously-reproduced artifacts
+    parser.add_argument(
+        "--ignore_previous_artifact",
+        action="store_true",
+        help="Ignore the previously-reproduced artifacts.",
+    )
+
+    parser.add_argument(
+        "-s",
+        "--success_only",
+        action="store_true",
+        help="Whether to filter the data to only include successful demos.",
     )
 
     # limit the number of demos to convert
@@ -442,13 +515,28 @@ if __name__ == "__main__":
 
     # convert to lerobot
     output_dir = Path(f"{args.output_dir}/{download_task}")
+
+    # for success_only, it should be copied to new directory
+    if args.success_only:
+        output_dir = Path(f"{args.output_dir}/{download_task}_so")
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # if there is existing repro data, use it
+    previous_artifact = (
+        None if args.ignore_previous_artifact else output_dir / PREVIOUS_ARTIFACT_FILE
+    )
+
     make_lerobot_dataset(
         download_task,
         dataset_path,
         output_dir,
         num_demos=args.num_demos,
+        previous_artifact=previous_artifact,
+        success_only=args.success_only,
     )
 
     if args.push_to_hub:
-        push_to_hub(output_dir, repo_id=f"{args.dataset_repo_prefix}_{download_task}")
+        repo_id = f"{args.dataset_repo_prefix}_{download_task}"
+        if args.success_only:
+            repo_id = f"{repo_id}_so"
+        push_to_hub(output_dir, repo_id=repo_id)
