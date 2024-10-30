@@ -29,11 +29,17 @@ from lerobot.common.datasets.utils import hf_transform_to_torch
 from lerobot.common.datasets.video_utils import VideoFrame, encode_video_frames
 from lerobot.scripts.push_dataset_to_hub import save_meta_data
 
-from utils import save_images_concurrently, push_to_hub, save_states_to_hdf5, compute_stats
+from utils import (
+    save_images_concurrently,
+    push_to_hub,
+    save_states_to_hdf5,
+    compute_stats,
+    copy_work_dir,
+)
 from env import MimicgenWrapper, ENV_META_DIR, IMAGE_OBS_SIZE
 
 
-NUM_WORKERS = 8
+NUM_WORKERS = 4
 ENV_CONFIG_DIR = Path("./configs/env")
 
 PREVIOUS_ARTIFACT_FILE = "repro_data.pt"
@@ -392,7 +398,7 @@ def make_lerobot_dataset(
         videos_dir=Path(f"{output_dir}/videos"),
     )
 
-    stats = compute_stats(lerobot_dataset, batch_size=512, num_workers=NUM_WORKERS)
+    stats = compute_stats(lerobot_dataset, batch_size=1024, num_workers=NUM_WORKERS)
 
     hf_dataset = hf_dataset.with_format(None)  # to remove transforms that cant be saved
     hf_dataset.save_to_disk(f"{output_dir}/hf_data/")
@@ -440,7 +446,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset_type",
         type=str,
-        default="source",
+        default="core",
         choices=list(DATASET_REGISTRY.keys()),
         help="Dataset type to download datasets for (e.g. source, core, object, robot, large_interpolation). Defaults to source.",
     )
@@ -450,7 +456,7 @@ if __name__ == "__main__":
         "-t",
         "--task",
         type=str,
-        default="stack",
+        default="coffee_preparation_d0",
         help="Task to download datasets for. Defaults to stack task.",
     )
 
@@ -507,11 +513,15 @@ if __name__ == "__main__":
     dataset_path = download_mimicgen_dataset(download_dir, download_task, download_dataset_type)
 
     # convert to lerobot
-    output_dir = Path(f"{args.output_dir}/{download_task}")
+    output_dir = f"{args.output_dir}/{download_task}"
 
     # for success_only, it should be copied to new directory
     if args.success_only:
-        output_dir = Path(f"{args.output_dir}/{download_task}_so")
+        if os.path.exists(output_dir + "/" + PREVIOUS_ARTIFACT_FILE):
+            copy_work_dir(output_dir, dst_dir=output_dir + "_so")
+        output_dir = output_dir + "_so"
+
+    output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # if there is existing repro data, use it

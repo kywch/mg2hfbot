@@ -165,6 +165,12 @@ def copy_work_dir(src_dir, dst_dir):
     shutil.copy2(src_dir / "repro_data.pt", dst_dir / "repro_data.pt")
 
 
+def worker_init_fn(worker_id):
+    # Set unique numpy/torch seeds per worker
+    np.random.seed(worker_id)
+    torch.manual_seed(worker_id)
+
+
 def compute_stats(dataset, batch_size=8, num_workers=8, max_num_samples=None, device="cuda"):
     """Compute mean/std and min/max statistics of all data keys in a Dataset using Welford's algorithm."""
     if max_num_samples is None:
@@ -207,9 +213,11 @@ def compute_stats(dataset, batch_size=8, num_workers=8, max_num_samples=None, de
         num_workers=num_workers,
         shuffle=False,  # No need to shuffle for statistics
         drop_last=False,
-        pin_memory=True,  # Faster data transfer to GPU
-        persistent_workers=True,  # Keep workers alive between iterations
-        prefetch_factor=2,  # Prefetch next batches
+        pin_memory=True,
+        persistent_workers=True,
+        # To handle worker segfaults
+        worker_init_fn=worker_init_fn,
+        multiprocessing_context="forkserver",
     )
 
     for i, batch in enumerate(
