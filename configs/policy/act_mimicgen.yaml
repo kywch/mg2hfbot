@@ -48,8 +48,8 @@ policy:
 
   input_shapes:
     # TODO(rcadene, alexander-soare): add variables for height and width from the dataset/env?
-    observation.images.agentview: [3, 256, 256]
-    observation.images.robot0_eye_in_hand: [3, 256, 256]
+    observation.images.agentview: [3, 96, 96]
+    observation.images.robot0_eye_in_hand: [3, 96, 96]
     observation.state: ["${env.state_dim}"]
   output_shapes:
     action: ["${env.action_dim}"]

@@ -14,7 +14,6 @@ import robomimic.utils.obs_utils as ObsUtils
 ENV_META_DIR = Path("./env_meta")
 
 IMAGE_OBS_SIZE = (96, 96)
-HIGHRES_IMAGE_OBS_SIZE = (256, 256)
 
 
 def make_mimicgen_env(

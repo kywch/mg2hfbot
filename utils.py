@@ -1,18 +1,23 @@
 import json
+import shutil
 from pathlib import Path
-from omegaconf import OmegaConf
-
+from math import ceil
 from concurrent.futures import ThreadPoolExecutor
+
+from omegaconf import OmegaConf
 import PIL
 import h5py
+import tqdm
 
 import numpy as np
 import torch
+import einops
 from datasets import Dataset
 from safetensors.torch import load_file, safe_open
 
 from lerobot.common.datasets.factory import resolve_delta_timestamps
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.common.datasets.compute_stats import get_stats_einops_patterns
 from lerobot.common.datasets.utils import hf_transform_to_torch
 from lerobot.common.datasets.transforms import get_image_transforms
 from lerobot.scripts.push_dataset_to_hub import (
@@ -142,3 +147,129 @@ def load_states_from_hdf5(file_path):
                 {"states": hf[key]["states"][:], "model": hf[key]["model"][()].decode("utf-8")}
             )
         return initial_states
+
+
+def copy_work_dir(src_dir, dst_dir):
+    src_dir, dst_dir = Path(src_dir), Path(dst_dir)
+
+    if not src_dir.exists():
+        raise FileNotFoundError(f"Source directory {src_dir} does not exist.")
+
+    if not dst_dir.exists():
+        dst_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy hf_data, meta_data, and videos directories
+    for dir_name in ["hf_data", "meta_data", "videos"]:
+        shutil.copytree(src_dir / dir_name, dst_dir / dir_name)
+
+    shutil.copy2(src_dir / "repro_data.pt", dst_dir / "repro_data.pt")
+
+
+def compute_stats(dataset, batch_size=8, num_workers=8, max_num_samples=None, device="cuda"):
+    """Compute mean/std and min/max statistics of all data keys in a Dataset using Welford's algorithm."""
+    if max_num_samples is None:
+        max_num_samples = len(dataset)
+
+    stats_patterns = get_stats_einops_patterns(dataset, num_workers)
+
+    # Check if CUDA is available if device is set to "cuda"
+    if device == "cuda" and not torch.cuda.is_available():
+        print("Warning: CUDA not available, falling back to CPU")
+        device = "cpu"
+
+    # First batch to determine shapes
+    temp_loader = torch.utils.data.DataLoader(dataset, batch_size=1)
+    first_batch = next(iter(temp_loader))
+
+    # Initialize statistics dictionaries
+    count = {}  # Track count for each key
+    mean = {}  # Running mean
+    M2 = {}  # Running sum of squares of differences
+    max_vals = {}
+    min_vals = {}
+
+    # Initialize trackers for each key
+    for key, pattern in stats_patterns.items():
+        # Get the shape after reduction
+        sample_data = first_batch[key].float()
+        reduced_shape = einops.reduce(sample_data, pattern, "sum").shape
+
+        count[key] = torch.zeros(1, device=device).float()
+        mean[key] = torch.zeros(reduced_shape, device=device).float()
+        M2[key] = torch.zeros(reduced_shape, device=device).float()
+        max_vals[key] = torch.full(reduced_shape, -float("inf"), device=device).float()
+        min_vals[key] = torch.full(reduced_shape, float("inf"), device=device).float()
+
+    # Create optimized dataloader
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=False,  # No need to shuffle for statistics
+        drop_last=False,
+        pin_memory=True,  # Faster data transfer to GPU
+        persistent_workers=True,  # Keep workers alive between iterations
+        prefetch_factor=2,  # Prefetch next batches
+    )
+
+    for i, batch in enumerate(
+        tqdm.tqdm(dataloader, total=ceil(max_num_samples / batch_size), desc="Computing statistics")
+    ):
+        this_batch_size = len(batch["index"])
+
+        # Load data to GPU
+        for key in stats_patterns:
+            batch[key] = batch[key].to(device, non_blocking=True).float()
+
+        for key, pattern in stats_patterns.items():
+            # Compute batch stats
+            batch_mean = einops.reduce(batch[key], pattern, "mean")
+            batch_M2 = einops.reduce((batch[key] - batch_mean) ** 2, pattern, "sum")
+            delta = batch_mean - mean[key]
+
+            # Get sample count
+            data_shape = batch[key].shape
+            if batch[key].ndim == 4:  # Image observations
+                sample_count = this_batch_size * data_shape[2] * data_shape[3]
+            elif batch[key].ndim in [1, 2]:
+                sample_count = this_batch_size
+            else:
+                raise ValueError(f"Invalid data shape: {data_shape}")
+
+            # Update combined statistics using parallel algorithm
+            # Reference: https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Parallel_algorithm
+            mean[key] = (mean[key] * count[key] + batch_mean * sample_count) / (
+                count[key] + sample_count
+            )
+            M2[key] = (
+                M2[key]
+                + batch_M2
+                + (delta**2) * sample_count * count[key] / (count[key] + sample_count)
+            )
+
+            # Update min/max, count
+            max_vals[key] = torch.maximum(max_vals[key], einops.reduce(batch[key], pattern, "max"))
+            min_vals[key] = torch.minimum(min_vals[key], einops.reduce(batch[key], pattern, "min"))
+            count[key] += sample_count
+
+        if i == ceil(max_num_samples / batch_size) - 1:
+            break
+
+    # Compute final statistics
+    stats = {}
+    for key in stats_patterns:
+        # Calculate standard deviation from M2
+        std = (
+            torch.sqrt(M2[key] / count[key])
+            if count[key] > 1
+            else torch.tensor(0.0, device=device).float()
+        )
+
+        stats[key] = {
+            "mean": mean[key].cpu(),
+            "std": std.cpu(),
+            "max": max_vals[key].cpu(),
+            "min": min_vals[key].cpu(),
+        }
+
+    return stats

@@ -19,4 +19,3 @@ env:
 
   # These should match the policy requirements
   use_delta_action: true
-  use_highres_image_obs: false

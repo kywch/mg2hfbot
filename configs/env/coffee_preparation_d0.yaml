@@ -18,4 +18,3 @@ env:
   - robot0_gripper_qpos
 
   use_delta_action: true
-  use_highres_image_obs: false

@@ -51,7 +51,7 @@ from lerobot.scripts.train import (
 )
 
 from utils import make_dataset_from_local, load_states_from_hdf5
-from env import make_mimicgen_env, IMAGE_OBS_SIZE, HIGHRES_IMAGE_OBS_SIZE
+from env import make_mimicgen_env, IMAGE_OBS_SIZE
 
 
 def validate_config(cfg: DictConfig):
@@ -72,25 +72,21 @@ def validate_config(cfg: DictConfig):
     image_obs_shape = cfg.policy.input_shapes["observation.images.agentview"]
     if cfg.policy.name == "act":
         assert not cfg.env.use_delta_action, "ACT should not use delta actions"
-        assert cfg.env.use_highres_image_obs, "ACT should use highres image obs"
         assert (
-            image_obs_shape[1] == HIGHRES_IMAGE_OBS_SIZE[0]
-            and image_obs_shape[2] == HIGHRES_IMAGE_OBS_SIZE[1]
-        ), "Image obs shape does not match highres image obs size"
+            image_obs_shape[1] == IMAGE_OBS_SIZE[0] and image_obs_shape[2] == IMAGE_OBS_SIZE[1]
+        ), "Image obs shape does not match image obs size"
 
     elif cfg.policy.name == "diffusion":
         assert not cfg.env.use_delta_action, "Diffusion should not use delta actions"
-        assert not cfg.env.use_highres_image_obs, "Diffusion should not use highres image obs"
         assert (
             image_obs_shape[1] == IMAGE_OBS_SIZE[0] and image_obs_shape[2] == IMAGE_OBS_SIZE[1]
         ), "Image obs shape does not match image obs size"
 
     elif cfg.policy.name.startswith("bc"):
         assert cfg.env.use_delta_action, "BC-RNN should use delta actions"
-        assert not cfg.env.use_highres_image_obs, "BC-RNN should not use highres image obs"
         assert (
             image_obs_shape[1] == IMAGE_OBS_SIZE[0] and image_obs_shape[2] == IMAGE_OBS_SIZE[1]
-        ), "Image obs shape does not match highres image obs size"
+        ), "Image obs shape does not match image obs size"
 
     else:
         raise NotImplementedError(f"Unsupported policy: {cfg.policy.name}")
@@ -267,10 +263,6 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
         # Modify the action and image obs to match the config
         if cfg.env.use_delta_action:
             batch["action"] = batch["action_delta"]
-
-        if cfg.env.use_highres_image_obs:
-            for k in cfg.env.image_keys:
-                batch[f"observation.images.{k}"] = batch[f"observation.images.{k}_highres"]
 
         for key in batch:
             batch[key] = batch[key].to(device, non_blocking=True)

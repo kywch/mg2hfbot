@@ -23,21 +23,19 @@ import robosuite.utils.transform_utils as T
 
 # datasets come with lerobot
 from datasets import Dataset, Features, Sequence, Value
-from lerobot.common.datasets.compute_stats import compute_stats
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.common.datasets.push_dataset_to_hub.utils import concatenate_episodes
 from lerobot.common.datasets.utils import hf_transform_to_torch
 from lerobot.common.datasets.video_utils import VideoFrame, encode_video_frames
 from lerobot.scripts.push_dataset_to_hub import save_meta_data
 
-from utils import save_images_concurrently, push_to_hub, save_states_to_hdf5
-from env import MimicgenWrapper, ENV_META_DIR, IMAGE_OBS_SIZE, HIGHRES_IMAGE_OBS_SIZE
+from utils import save_images_concurrently, push_to_hub, save_states_to_hdf5, compute_stats
+from env import MimicgenWrapper, ENV_META_DIR, IMAGE_OBS_SIZE
 
 
 NUM_WORKERS = 8
 ENV_CONFIG_DIR = Path("./configs/env")
 
-HIGHRES_IMAGE_OBS_POSTFIX = "_highres"
 PREVIOUS_ARTIFACT_FILE = "repro_data.pt"
 
 
@@ -192,25 +190,16 @@ def reproduce_trajectory(mg_file, demos, repro_env, trans_env, follow_through=30
         for img_key in repro_env.image_keys:
             save_images_concurrently(
                 image_obs[img_key],
-                Path(f"{output_dir}/images/{img_key}_episode_{ep_idx:06d}_highres"),
-                lowres_out_dir=Path(f"{output_dir}/images/{img_key}_episode_{ep_idx:06d}"),
-                lowres_size=IMAGE_OBS_SIZE,
+                Path(f"{output_dir}/images/{img_key}_episode_{ep_idx:06d}"),
                 max_workers=NUM_WORKERS,
             )
             ep_dict[f"observation.images.{img_key}"] = []
             fname = f"{img_key}_episode_{ep_idx:06d}.mp4"
 
-            # NOTE: comment out the lowres video for now
-            fname_highres = f"{img_key}_episode_{ep_idx:06d}_highres.mp4"
-            ep_dict[f"observation.images.{img_key}_highres"] = []
-
             # store the reference to the video frame
             for tstp in ep_dict["timestamp"].tolist():
                 ep_dict[f"observation.images.{img_key}"].append(
                     {"path": f"videos/{fname}", "timestamp": tstp}
-                )
-                ep_dict[f"observation.images.{img_key}_highres"].append(
-                    {"path": f"videos/{fname_highres}", "timestamp": tstp}
                 )
 
         ep_dicts.append(ep_dict)
@@ -295,9 +284,6 @@ def make_lerobot_dataset(
         use_image_obs=False,
     )
 
-    # NOTE: change the image size to the highres size
-    repro_env_meta["env_kwargs"]["camera_heights"] = HIGHRES_IMAGE_OBS_SIZE[0]
-    repro_env_meta["env_kwargs"]["camera_widths"] = HIGHRES_IMAGE_OBS_SIZE[1]
     repro_env = EnvUtils.create_env_from_metadata(
         env_meta=repro_env_meta,
         render=False,  # no on-screen rendering
@@ -347,10 +333,10 @@ def make_lerobot_dataset(
             else:
                 # Delete failed demo videos, when success_only is True
                 for img_key in repro_env.image_keys:
-                    os.remove(output_dir / ep_dict[f"observation.images.{img_key}"][0]["path"])
-                    os.remove(
-                        output_dir / ep_dict[f"observation.images.{img_key}_highres"][0]["path"]
-                    )
+                    if Path(
+                        output_dir / ep_dict[f"observation.images.{img_key}"][0]["path"]
+                    ).exists():
+                        os.remove(output_dir / ep_dict[f"observation.images.{img_key}"][0]["path"])
     else:
         ep_dicts, initial_states, ep_success = (
             repro_data["ep_dicts"],
@@ -406,7 +392,7 @@ def make_lerobot_dataset(
         videos_dir=Path(f"{output_dir}/videos"),
     )
 
-    stats = compute_stats(lerobot_dataset, num_workers=NUM_WORKERS)
+    stats = compute_stats(lerobot_dataset, batch_size=512, num_workers=NUM_WORKERS)
 
     hf_dataset = hf_dataset.with_format(None)  # to remove transforms that cant be saved
     hf_dataset.save_to_disk(f"{output_dir}/hf_data/")
@@ -482,7 +468,7 @@ if __name__ == "__main__":
         help="Whether to filter the data to only include successful demos.",
     )
 
-    # limit the number of demos to convert
+    # limit the number of demos to convert, useful for debugging
     parser.add_argument(
         "-n",
         "--num_demos",
@@ -506,10 +492,6 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-
-    args.dataset_type = "core"
-    args.task = "coffee_preparation_d0"
-    args.success_only = True
 
     # load args
     download_dir = args.download_dir
