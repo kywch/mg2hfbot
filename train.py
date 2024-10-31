@@ -34,7 +34,6 @@ from lerobot.common.datasets.lerobot_dataset import MultiLeRobotDataset
 from lerobot.common.datasets.sampler import EpisodeAwareSampler
 from lerobot.common.datasets.utils import cycle
 from lerobot.common.logger import Logger, log_output_dir
-from lerobot.common.policies.factory import make_policy
 from lerobot.common.utils.utils import (
     format_big_number,
     get_safe_torch_device,
@@ -44,7 +43,6 @@ from lerobot.common.utils.utils import (
 
 from lerobot.scripts.eval import eval_policy
 from lerobot.scripts.train import (
-    make_optimizer_and_scheduler,
     update_policy,
     log_train_info,
     log_eval_info,
@@ -52,6 +50,7 @@ from lerobot.scripts.train import (
 
 from utils import make_dataset_from_local, load_states_from_hdf5
 from env import make_mimicgen_env, IMAGE_OBS_SIZE
+from policies.factory import make_policy, make_optimizer_and_scheduler
 
 
 def validate_config(cfg: DictConfig):

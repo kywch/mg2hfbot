@@ -28,7 +28,6 @@ import torch
 from torch import nn
 
 from lerobot.common.logger import log_output_dir
-from lerobot.common.policies.factory import make_policy
 from lerobot.common.utils.utils import (
     get_safe_torch_device,
     init_hydra_config,
@@ -43,6 +42,7 @@ from lerobot.scripts.eval import (
 
 from utils import make_dataset_from_local
 from env import make_mimicgen_env
+from policies.factory import make_policy
 
 
 def main(
