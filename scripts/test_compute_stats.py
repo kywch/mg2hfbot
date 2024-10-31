@@ -194,12 +194,16 @@ if __name__ == "__main__":
     )
     compare_stats(ref_stats, stats_gpu)
 
-    # repo: lerobot/pusht, 212 files
-    # * default: 45.9 s
-    # * single pass, large bs, cpu: 21.3 s
-    # * single pass, large bs, gpu: 20.4 s
+    """
+        repo: lerobot/pusht, 212 files
+        * current implementation: 47.2 s
+        * new implmentation (bs=8, cpu): 27.5 s
+        * new implmentation (bs=256, cpu): 20.3 s
+        * new implmentation (bs=256, gpu): 20.1 s
 
-    # repo: kywch/mimicgen_stack_d0, 4010 files
-    # * default: 962 s
-    # * new implementation (gpu): 458 s
-    # * new implementation (cpu): 502 s
+        repo: kywch/mimicgen_stack_d0, 4010 files
+        * current implementation: 1004.8 s
+        * new implmentation (bs=8, cpu): 554.5 s
+        * new implmentation (bs=256, cpu): 499.5 s
+        * new implmentation (bs=256, gpu): 455.9 s
+    """
