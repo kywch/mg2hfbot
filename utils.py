@@ -213,7 +213,7 @@ def compute_stats(dataset, batch_size=8, num_workers=8, max_num_samples=None, de
         num_workers=num_workers,
         shuffle=False,  # No need to shuffle for statistics
         drop_last=False,
-        pin_memory=True,
+        pin_memory=device == "cuda",
         persistent_workers=True,
         # To handle worker segfaults
         worker_init_fn=worker_init_fn,

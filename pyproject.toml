@@ -22,7 +22,7 @@ dependencies = [
     "robosuite==1.4.1",
     "robomimic@git+https://github.com/ARISE-Initiative/robomimic.git",
     "robosuite_task_zoo@git+https://github.com/kywch/robosuite-task-zoo.git",
-    "lerobot@git+https://github.com/kywch/lerobot.git@robo-bc",
+    "lerobot@git+https://github.com/kywch/lerobot.git",
     "wandb",
 ]
 
