@@ -48,9 +48,10 @@ from lerobot.scripts.train import (
     log_eval_info,
 )
 
-from utils import make_dataset_from_local, load_states_from_hdf5
-from env import make_mimicgen_env, IMAGE_OBS_SIZE
+from mg2hfbot import IMAGE_OBS_SIZE
+from mg2hfbot.env import make_mimicgen_env
 from policies.factory import make_policy, make_optimizer_and_scheduler
+from mg2hfbot.utils import make_dataset_from_local, load_states_from_hdf5
 
 
 def validate_config(cfg: DictConfig):
@@ -70,19 +71,31 @@ def validate_config(cfg: DictConfig):
     # Check if the env config matches the policy config
     image_obs_shape = cfg.policy.input_shapes["observation.images.agentview"]
     if cfg.policy.name == "act":
-        assert not cfg.env.use_delta_action, "ACT should not use delta actions"
+        if cfg.env.use_delta_action:
+            logging.warning(
+                "ACT should NOT use delta actions. Setting cfg.env.use_delta_action to False."
+            )
+            cfg.env.use_delta_action = False
         assert (
             image_obs_shape[1] == IMAGE_OBS_SIZE[0] and image_obs_shape[2] == IMAGE_OBS_SIZE[1]
         ), "Image obs shape does not match image obs size"
 
     elif cfg.policy.name == "diffusion":
-        assert not cfg.env.use_delta_action, "Diffusion should not use delta actions"
+        if cfg.env.use_delta_action:
+            logging.warning(
+                "Diffusion should NOT use delta actions. Setting cfg.env.use_delta_action to False."
+            )
+            cfg.env.use_delta_action = False
         assert (
             image_obs_shape[1] == IMAGE_OBS_SIZE[0] and image_obs_shape[2] == IMAGE_OBS_SIZE[1]
         ), "Image obs shape does not match image obs size"
 
     elif cfg.policy.name.startswith("bc"):
-        assert cfg.env.use_delta_action, "BC-RNN should use delta actions"
+        if not cfg.env.use_delta_action:
+            logging.warning(
+                "BC-RNN should use delta actions. Setting cfg.env.use_delta_action to True."
+            )
+            cfg.env.use_delta_action = True
         assert (
             image_obs_shape[1] == IMAGE_OBS_SIZE[0] and image_obs_shape[2] == IMAGE_OBS_SIZE[1]
         ), "Image obs shape does not match image obs size"

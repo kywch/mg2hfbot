@@ -40,9 +40,9 @@ from lerobot.scripts.eval import (
     eval_policy,
 )
 
-from utils import make_dataset_from_local
-from env import make_mimicgen_env
+from mg2hfbot.env import make_mimicgen_env
 from policies.factory import make_policy
+from mg2hfbot.utils import make_dataset_from_local
 
 
 def main(

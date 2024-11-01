@@ -4,7 +4,7 @@ seed: 1000
 dataset_repo_id: kywch/mimicgen_stack_d0 
 
 training:
-  offline_steps: 160000
+  offline_steps: 120000
   online_steps: 0
   eval_freq: 10000
   save_freq: 20000
@@ -22,7 +22,7 @@ training:
 
   # Training
   num_workers: 4
-  batch_size: 16
+  batch_size: 8
   grad_clip_norm: 200
 
   delta_timestamps:

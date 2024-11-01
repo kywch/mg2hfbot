@@ -1,5 +1,4 @@
 from collections import deque
-from pathlib import Path
 import json
 
 from omegaconf import DictConfig
@@ -10,10 +9,7 @@ import mimicgen  # noqa
 import robomimic.utils.env_utils as EnvUtils
 import robomimic.utils.obs_utils as ObsUtils
 
-
-ENV_META_DIR = Path("./env_meta")
-
-IMAGE_OBS_SIZE = (96, 96)
+from mg2hfbot import ENV_META_DIR
 
 
 def make_mimicgen_env(
