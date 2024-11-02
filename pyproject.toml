@@ -4,9 +4,8 @@ requires = ["cython>=3.0", "pip>=23.0", "setuptools>=61.0", "wheel"]
 [project]
 name = "mg2hfbot"
 requires-python = ">=3.10,<3.11"
-version = "0.0.1"
-description = "Use lerobot to use mimicgen data and control robosuite envs"
-keywords = []
+version = "0.1.0"
+description = "Use lerobot to convert the mimicgen data and train/test on robosuite envs"
 classifiers = [
 	"Natural Language :: English",
 	"Operating System :: POSIX :: Linux",
@@ -26,18 +25,34 @@ dependencies = [
     "wandb",
 ]
 
+[tool.pixi.project]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[system-requirements]
+cuda = "12"
+
+[tool.pixi.dependencies]
+datasets = "*"
+ffmpeg = "*"
+numba = ">=0.59.0"
+rerun-sdk = ">=0.15.1"
+
+# For convenience
+ruff = "*"
+pre-commit = "*"
+
+[tool.pixi.pypi-dependencies]
+mg2hfbot = { path = ".", editable = true }
+
+[tool.pixi.tasks]
+train = "python train.py"
+eval = "python eval.py"
+convert = "python convert_to_lerobot.py"
+
 [tool.setuptools.packages.find]
 where = ["."]
 exclude = ["tests"]
-
-[project.optional-dependencies]
-monitoring = [
-    "nvitop"
-]
-dev = [
-    "pre-commit",
-    "ruff"
-]
 
 [tool.distutils.bdist_wheel]
 universal = true
@@ -77,7 +92,7 @@ exclude = [
 line-length = 100
 indent-width = 4
 
-# Assume Python 3.11
+# Assume Python 3.10
 target-version = "py310"
 
 [tool.ruff.lint]
