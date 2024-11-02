@@ -36,6 +36,7 @@ cuda = "12.1"
 cuda-toolkit = "12.1"
 numba = ">=0.59.0"
 pyarrow = ">=17.0.0"
+pytorch = ">=2.0,<2.5"
 pytorch-cuda = "12.1"
 rerun-sdk = ">=0.15.1"
 
