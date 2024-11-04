@@ -1,7 +1,7 @@
 # @package _global_
 
 seed: 1000
-dataset_repo_id: kywch/mimicgen_stack_d0 
+dataset_repo_id: kywch/mimicgen_stack
 
 override_dataset_stats:
   observation.images.agentview:

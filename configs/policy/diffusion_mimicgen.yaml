@@ -5,7 +5,7 @@
 #       https://github.com/huggingface/lerobot/pull/134 for more details.
 
 seed: 100000
-dataset_repo_id: kywch/mimicgen_stack_d0
+dataset_repo_id: kywch/mimicgen_stack
 
 # override_dataset_stats:
 #   # TODO(rcadene, alexander-soare): should we remove image stats as well? do we use a pretrained vision model?
