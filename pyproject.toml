@@ -23,6 +23,7 @@ dependencies = [
     "robosuite_task_zoo@git+https://github.com/kywch/robosuite-task-zoo.git",
     "lerobot@git+https://github.com/kywch/lerobot.git",
     "wandb",
+    "torch<2.5",
 ]
 
 [tool.pixi.project]
@@ -33,11 +34,8 @@ platforms = ["linux-64"]
 cuda = "12.1"
 
 [tool.pixi.dependencies]
-gcc_linux-64 = "*"
-gxx_linux-64 = "*"
-cmake = "*"
-make = "*"
 cuda-toolkit = "12.1"
+evdev = ">=1.7.1,<2"
 numba = ">=0.59.0"
 pyarrow = ">=17.0.0"
 pytorch = ">=2.0,<2.5"
