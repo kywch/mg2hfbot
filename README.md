@@ -45,7 +45,7 @@ MimicGen provides over 26,000 trajectories across 12 different tasks. `mg2hfbot`
 
 
 ### Troubleshooting
-* This repo assumes that you have a GPU with CUDA 12.2+ installed. TO check if your CUDA version, run:
+* This repo assumes that you have a GPU with CUDA 12.1+ installed. TO check if your CUDA version, run:
     ```
     $ nvidia-smi
     ```
