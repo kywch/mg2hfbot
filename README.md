@@ -4,6 +4,8 @@ Want to try LeRobot on complex tasks without a physical robot arm?
 
 MimicGen provides over 26,000 trajectories across 12 different tasks. `mg2hfbot` converts MimicGen datasets, trains state-of-the-art LeRobot policies (including ACT and diffusion) on these datasets, and evaluates the trained policies.
 
+Thank you to Ajay Mandlekar and Remi Cadene for guidance, and [Puffer AI](https://github.com/PufferAI/PufferLib) for computing support.
+
 ## Getting Started
 
 1. Clone the repository.
@@ -87,6 +89,11 @@ MimicGen provides over 26,000 trajectories across 12 different tasks. `mg2hfbot`
     ```
     $ pixi install
     ```
+
+## Known Issues
+* The conversion and evaluation runs on a single environment, so it might take some time. I tried the vectorized environment but could not make it work.
+* While converting the MimicGen datasets, not all demonstrations were successfully reproduced. On the HuggingFace Hub, the dataset containing only successful demonstrations is available with the _so suffix, like `kywch/mimicgen_stack_d0_so`.
+
 
 ## MimicGen datasets
 MimicGen contains two types of datasets: source human demonstrations and core task variations. The convert script downloads the data into `mg_download` directory. For more details about MimicGen, see their [project website](https://mimicgen.github.io/) and the [paper](https://arxiv.org/pdf/2310.17596).
