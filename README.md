@@ -34,7 +34,7 @@ Thank you to Ajay Mandlekar and Remi Cadene for guidance, and [Puffer AI](https:
 4. Train a policy.
     The following command trains an ACT policy on the stack_d0 task.
     ```
-    (.venv) $ python train.py --env stack_d0 --policy act_mimicgen --dataset_repo_id kywch/mimicgen_stack_d0
+    (.venv) $ python train.py env=stack_d0 policy=act_mimicgen dataset_repo_id=kywch/mimicgen_stack_d0
     ```
     `stack_d0`, `act_mimicgen` and `kywch/mimicgen_stack_d0` can be replaced with other task, policy and dataset repo IDs.
 
