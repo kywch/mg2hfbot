@@ -10,23 +10,36 @@ Thank you to Ajay Mandlekar and Remi Cadene for guidance, and [Puffer AI](https:
 
 1. Clone the repository.
     ```
-    $ git clone https://github.com/kywch/mg2hfbot.git
-    $ cd mg2hfbot
+    git clone https://github.com/kywch/mg2hfbot.git
+    ```
+    
+    Then, go to the repository directory.
+    ```
+    cd mg2hfbot
     ```
 
 2. Setup the virtual environment and install dependencies.
 
+    Setup the virtual environment.
     ```
-    $ python3.10 -m venv .venv
-    $ source .venv/bin/activate
-    (.venv) $ pip install -e .
+    python3.10 -m venv .venv
+    ```
+
+    Activate the virtual environment.
+    ```
+    source .venv/bin/activate
+    ```
+
+    When you see (.venv) $, you are in the virtual environment.
+    ```
+    pip install -e .
     ```
 
 3. Evaluate a pretrained policy.
    
    The following command downloads the pretrained policy from HuggingFace Hub and evaluates it.
    ```
-   (.venv) $ python eval.py -p kywch/act_mimicgen_stack_d0
+   python eval.py -p kywch/act_mimicgen_stack_d0
    ```
 
    You can also evaluate a pretrained policy from a local directory using the same `-p <directory>`. You can find the pretrained policy in the `outputs/train/<date>/<time_policy>/checkpoints/<steps>/pretrained_model`.
@@ -34,38 +47,45 @@ Thank you to Ajay Mandlekar and Remi Cadene for guidance, and [Puffer AI](https:
 4. Train a policy.
     The following command trains an ACT policy on the stack_d0 task.
     ```
-    (.venv) $ python train.py env=stack_d0 policy=act_mimicgen dataset_repo_id=kywch/mimicgen_stack_d0
+    python train.py env=stack_d0 policy=act_mimicgen dataset_repo_id=kywch/mimicgen_stack_d0
     ```
     `stack_d0`, `act_mimicgen` and `kywch/mimicgen_stack_d0` can be replaced with other task, policy and dataset repo IDs.
+
+    NOTE: By default, MimicGen and RoboMimic BC-RNN use the delta end-effector pose, whereas ACT and diffusion use the absolute end-effector pose. The training script automatically sets the `use_delta_action` flag in the environment configuration: `True` for BC-RNN and `False` for ACT and diffusion.
 
 5. Convert MimicGen datasets into LeRobot format.
     The following command converts the MimicGen stack_d0 dataset to LeRobot format.
     ```
-    (.venv) $ python convert_to_lerobot.py --dataset_type core --task stack_d0
+    python convert_to_lerobot.py --dataset_type core --task stack_d0
     ```
     `core` and `stack_d0` can be replaced with other dataset type and task. 
 
+    NOTE: You must create the correct environment configuration file (i.e., `configs/env/stack_d0.yaml`) before converting the dataset. Run `scripts/check_env.py` for checking the environment and creating the config files.
+    ```
+    python scripts/check_env.py --dataset_type core --task square_d0
+    ```
+    
 
 ### Troubleshooting
 * This repo assumes that you have a GPU with CUDA 12.1+ installed. TO check if your CUDA version, run:
     ```
-    $ nvidia-smi
+    nvidia-smi
     ```
 
 * If you encounter errors during `git clone` or `pip install -e .`, run the following command. This will fail if you don't have sudo privileges.
     ```
-    $ sudo apt-get update && apt-get install build-essential cmake \
+    sudo apt-get update && apt-get install build-essential cmake \
         libglib2.0-0 libgl1-mesa-glx libegl1-mesa ffmpeg
     ```
 
 * If you encounter errors during `python3.10 -m venv .venv`, run the following command. This will fail if you don't have sudo privileges.
     ```
-    $ sudo apt-get install python3.10-dev python3.10-venv
+    sudo apt-get install python3.10-dev python3.10-venv
     ```
 
 * If you don't have a sudo privilege but can use docker, you can set up a docker container with the following command:
     ```
-    $ docker run -it \
+    docker run -it \
         --name pixi \
         --gpus all \
         --shm-size 8gb \
@@ -80,14 +100,14 @@ Thank you to Ajay Mandlekar and Remi Cadene for guidance, and [Puffer AI](https:
     ```
     Then, inside the docker container, run the following commands:
     ```
-    # apt-get update && apt-get install -y --no-install-recommends \
+    apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake \
         libglib2.0-0 libgl1-mesa-glx libegl1-mesa ffmpeg \
         python3.10-dev python3.10-venv
     ```
 * EXPERIMENTAL: The above docker container comes with `pixi` installed, which is an alternative to venv and pip. To install dependencies, run the following command in the `mg2hfbot` directory after running the above `apt-get install ...`:
     ```
-    $ pixi install
+    pixi install
     ```
 
 ## Known Issues
